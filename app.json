@@ -1,0 +1,43 @@
+{
+  "expo": {
+    "name": "Reciprocal Headings",
+    "slug": "reciprocal-headings",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "icon": "./assets/icon.png",
+    "userInterfaceStyle": "dark",
+    "newArchEnabled": true,
+    "scheme": "reciprocal-headings",
+    "splash": {
+      "image": "./assets/splash-icon.png",
+      "resizeMode": "contain",
+      "backgroundColor": "#0f0f23"
+    },
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "com.10xflighttraining.reciprocalheadings",
+      "infoPlist": {
+        "NSSpeechRecognitionUsageDescription": "Speech recognition is used to validate your spoken responses during training.",
+        "NSMicrophoneUsageDescription": "Microphone access is needed for voice-based training levels."
+      }
+    },
+    "android": {
+      "package": "com.tenxflighttraining.reciprocalheadings",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#0f0f23"
+      },
+      "edgeToEdgeEnabled": true,
+      "permissions": [
+        "RECORD_AUDIO"
+      ]
+    },
+    "web": {
+      "favicon": "./assets/favicon.png",
+      "bundler": "metro"
+    },
+    "plugins": [
+      "expo-speech-recognition"
+    ]
+  }
+}
