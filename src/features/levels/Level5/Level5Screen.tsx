@@ -1,32 +1,38 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import HeadingDisplay from '../../stimulus/HeadingDisplay';
 import VoiceInput from '../../voice/VoiceInput';
 import FeedbackOverlay from '../../../ui/feedback/FeedbackOverlay';
-import { SessionManager } from '../../../state/sessionManager';
-import { useStore } from '../../../state/store';
 import { FeedbackState, TIMING, ValidationResult } from '../../../core/types';
+import { HEADING_PACKETS } from '../../../core/data/headingPackets';
+import { calculateReciprocalWithOnes, getDirection } from '../../../core/algorithms/reciprocal';
 import { ParsedResponse } from '../../voice/ResponseParser';
-import { VoiceResponse } from '../../../core/algorithms/validator';
+
+const ALL_HEADINGS = Object.keys(HEADING_PACKETS);
+const VOICE_LIMIT = 2000;
+
+function randomThreeDigitHeading(): string {
+  const base = ALL_HEADINGS[Math.floor(Math.random() * ALL_HEADINGS.length)];
+  const ones = Math.floor(Math.random() * 10).toString();
+  return base + ones;
+}
 
 export default function Level5Screen() {
-  const recordResult = useStore((s) => s.recordResult);
-
-  const sessionRef = useRef<SessionManager>(new SessionManager(5));
-  const [heading, setHeading] = useState(() => sessionRef.current.getNextHeading());
+  const [heading, setHeading] = useState(() => randomThreeDigitHeading());
   const [voiceActive, setVoiceActive] = useState(true);
   const [feedback, setFeedback] = useState<{
     state: FeedbackState;
     result: ValidationResult;
   } | null>(null);
-
-  useEffect(() => {
-    sessionRef.current.startTimer();
-  }, [heading]);
+  const [streak, setStreak] = useState(0);
+  const [repsCount, setRepsCount] = useState(0);
 
   const handleVoiceResult = useCallback(
     (parsed: ParsedResponse, confidence: 'high' | 'low') => {
       setVoiceActive(false);
+
+      const expected = calculateReciprocalWithOnes(heading);
+      const expectedDir = getDirection(heading);
 
       if (confidence === 'low') {
         setFeedback({
@@ -36,30 +42,50 @@ export default function Level5Screen() {
         return;
       }
 
-      const voiceResponse: VoiceResponse = {
-        number: parsed.number ?? '',
-        direction: parsed.direction ?? 'North',
-      };
+      const isCorrect = parsed.number === expected && parsed.direction === expectedDir;
+      const state: FeedbackState = isCorrect ? 'green' : 'red';
 
-      const result = sessionRef.current.submitResponse(voiceResponse);
-      recordResult(5, sessionRef.current.getCurrentBaseHeading(), result.state, sessionRef.current.getTimeElapsed());
-      setFeedback({ state: result.state, result });
+      setRepsCount((c) => c + 1);
+      if (state === 'green') {
+        setStreak((s) => s + 1);
+      } else {
+        setStreak(0);
+      }
+
+      setFeedback({
+        state,
+        result: {
+          isCorrect,
+          state,
+          correctAnswer: { reciprocal: expected, direction: expectedDir },
+        },
+      });
     },
-    [recordResult],
+    [heading],
   );
 
   const handleTimeout = useCallback(() => {
     setVoiceActive(false);
-    const result = sessionRef.current.submitResponse({ number: '', direction: 'North' } as VoiceResponse);
-    recordResult(5, sessionRef.current.getCurrentBaseHeading(), result.state, sessionRef.current.getTimeElapsed());
-    setFeedback({ state: result.state, result });
-  }, [recordResult]);
+    const expected = calculateReciprocalWithOnes(heading);
+    const expectedDir = getDirection(heading);
+
+    setRepsCount((c) => c + 1);
+    setStreak(0);
+
+    setFeedback({
+      state: 'red',
+      result: {
+        isCorrect: false,
+        state: 'red',
+        correctAnswer: { reciprocal: expected, direction: expectedDir },
+      },
+    });
+  }, [heading]);
 
   const handleFeedbackComplete = useCallback(() => {
     setFeedback(null);
     setTimeout(() => {
-      const next = sessionRef.current.getNextHeading();
-      setHeading(next);
+      setHeading(randomThreeDigitHeading());
       setVoiceActive(true);
     }, TIMING.INTER_REP_DELAY);
   }, []);
@@ -67,11 +93,15 @@ export default function Level5Screen() {
   return (
     <View style={styles.container}>
       <Text style={styles.levelLabel}>Level 5 — Single Digit Resolution</Text>
+      <View style={styles.statsRow}>
+        <Text style={styles.statText}>Streak: {streak}</Text>
+        <Text style={styles.statText}>Reps: {repsCount}</Text>
+      </View>
       <HeadingDisplay heading={heading} size="large" />
       <VoiceInput
         onResult={handleVoiceResult}
         onTimeout={handleTimeout}
-        timeLimit={TIMING.VERBAL_LIMIT}
+        timeLimit={VOICE_LIMIT}
         level={5}
         active={voiceActive}
       />
@@ -97,6 +127,15 @@ const styles = StyleSheet.create({
     color: '#00d4ff',
     fontWeight: '600',
     letterSpacing: 1,
-    marginBottom: 8,
+    marginBottom: 4,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    gap: 20,
+    marginBottom: 4,
+  },
+  statText: {
+    fontSize: 13,
+    color: '#667788',
   },
 });

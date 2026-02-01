@@ -1,43 +1,44 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import AudioStimulus from '../../stimulus/AudioStimulus';
 import VoiceInput from '../../voice/VoiceInput';
 import FeedbackOverlay from '../../../ui/feedback/FeedbackOverlay';
-import { SessionManager } from '../../../state/sessionManager';
-import { useStore } from '../../../state/store';
 import { FeedbackState, TIMING, ValidationResult } from '../../../core/types';
+import { HEADING_PACKETS } from '../../../core/data/headingPackets';
+import { calculateReciprocal, getDirection } from '../../../core/algorithms/reciprocal';
 import { ParsedResponse } from '../../voice/ResponseParser';
-import { VoiceResponse } from '../../../core/algorithms/validator';
+
+const ALL_HEADINGS = Object.keys(HEADING_PACKETS);
+const VOICE_LIMIT = 2000;
+
+function randomHeading(): string {
+  return ALL_HEADINGS[Math.floor(Math.random() * ALL_HEADINGS.length)];
+}
 
 export default function Level4Screen() {
-  const recordResult = useStore((s) => s.recordResult);
-
-  const sessionRef = useRef<SessionManager>(new SessionManager(4));
-  const [heading, setHeading] = useState(() => sessionRef.current.getNextHeading());
+  const [heading, setHeading] = useState(() => randomHeading());
   const [phase, setPhase] = useState<'stimulus' | 'listening'>('stimulus');
   const [voiceActive, setVoiceActive] = useState(false);
   const [feedback, setFeedback] = useState<{
     state: FeedbackState;
     result: ValidationResult;
   } | null>(null);
-
-  useEffect(() => {
-    sessionRef.current.startTimer();
-  }, [heading]);
+  const [streak, setStreak] = useState(0);
+  const [repsCount, setRepsCount] = useState(0);
 
   const handleAudioComplete = useCallback(() => {
     setPhase('listening');
     setVoiceActive(true);
-    // Re-start timer from when audio finishes (user can now respond)
-    sessionRef.current.startTimer();
   }, []);
 
   const handleVoiceResult = useCallback(
     (parsed: ParsedResponse, confidence: 'high' | 'low') => {
       setVoiceActive(false);
 
+      const expected = calculateReciprocal(heading);
+      const expectedDir = getDirection(heading);
+
       if (confidence === 'low') {
-        // Speak clearer — will play correct answer as interrupt
         setFeedback({
           state: 'amber',
           result: { isCorrect: false, state: 'amber', feedback: 'Speak Clearer!' },
@@ -45,35 +46,50 @@ export default function Level4Screen() {
         return;
       }
 
-      const voiceResponse: VoiceResponse = {
-        number: parsed.number ?? '',
-        direction: parsed.direction ?? 'North',
-      };
+      const isCorrect = parsed.number === expected && parsed.direction === expectedDir;
+      const state: FeedbackState = isCorrect ? 'green' : 'red';
 
-      const result = sessionRef.current.submitResponse(voiceResponse);
-      recordResult(4, sessionRef.current.getCurrentBaseHeading(), result.state, sessionRef.current.getTimeElapsed());
+      setRepsCount((c) => c + 1);
+      if (state === 'green') {
+        setStreak((s) => s + 1);
+      } else {
+        setStreak(0);
+      }
 
-      // Interrupt mechanic: on wrong/timeout, the correct answer audio would play here.
-      // TODO: integrate AudioManager.playAnswer() for interrupt
-      setFeedback({ state: result.state, result });
+      setFeedback({
+        state,
+        result: {
+          isCorrect,
+          state,
+          correctAnswer: { reciprocal: expected, direction: expectedDir },
+        },
+      });
     },
-    [recordResult],
+    [heading],
   );
 
   const handleTimeout = useCallback(() => {
     setVoiceActive(false);
-    const result = sessionRef.current.submitResponse({ number: '', direction: 'North' } as VoiceResponse);
-    recordResult(4, sessionRef.current.getCurrentBaseHeading(), result.state, sessionRef.current.getTimeElapsed());
-    // Interrupt: play answer audio
-    // TODO: AudioManager.playAnswer(heading)
-    setFeedback({ state: result.state, result });
-  }, [recordResult]);
+    const expected = calculateReciprocal(heading);
+    const expectedDir = getDirection(heading);
+
+    setRepsCount((c) => c + 1);
+    setStreak(0);
+
+    setFeedback({
+      state: 'red',
+      result: {
+        isCorrect: false,
+        state: 'red',
+        correctAnswer: { reciprocal: expected, direction: expectedDir },
+      },
+    });
+  }, [heading]);
 
   const handleFeedbackComplete = useCallback(() => {
     setFeedback(null);
     setTimeout(() => {
-      const next = sessionRef.current.getNextHeading();
-      setHeading(next);
+      setHeading(randomHeading());
       setPhase('stimulus');
       setVoiceActive(false);
     }, TIMING.INTER_REP_DELAY);
@@ -82,6 +98,10 @@ export default function Level4Screen() {
   return (
     <View style={styles.container}>
       <Text style={styles.levelLabel}>Level 4 — Auditory Vector Sense</Text>
+      <View style={styles.statsRow}>
+        <Text style={styles.statText}>Streak: {streak}</Text>
+        <Text style={styles.statText}>Reps: {repsCount}</Text>
+      </View>
 
       {phase === 'stimulus' && (
         <AudioStimulus heading={heading} onPlayComplete={handleAudioComplete} />
@@ -91,7 +111,7 @@ export default function Level4Screen() {
         <VoiceInput
           onResult={handleVoiceResult}
           onTimeout={handleTimeout}
-          timeLimit={TIMING.VERBAL_LIMIT}
+          timeLimit={VOICE_LIMIT}
           level={4}
           active={voiceActive}
         />
@@ -121,5 +141,15 @@ const styles = StyleSheet.create({
     color: '#00d4ff',
     fontWeight: '600',
     letterSpacing: 1,
+  },
+  statsRow: {
+    position: 'absolute',
+    top: 42,
+    flexDirection: 'row',
+    gap: 20,
+  },
+  statText: {
+    fontSize: 13,
+    color: '#667788',
   },
 });

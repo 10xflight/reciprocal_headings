@@ -14,7 +14,6 @@ import { useStore } from '../state/store';
 
 function showAlert(title: string, message: string, onOk?: () => void) {
   if (Platform.OS === 'web') {
-    // eslint-disable-next-line no-alert
     if (onOk) {
       const confirmed = window.confirm(`${title}\n\n${message}`);
       if (confirmed) onOk();
@@ -37,6 +36,8 @@ export default function SettingsScreen() {
   const exportState = useStore((s) => s.exportState);
   const importState = useStore((s) => s.importState);
   const resetProgress = useStore((s) => s.resetProgress);
+  const unlockAllLevels = useStore((s) => s.unlockAllLevels);
+  const toggleUnlockAllLevels = useStore((s) => s.toggleUnlockAllLevels);
 
   const [importCode, setImportCode] = useState('');
   const [exportedCode, setExportedCode] = useState<string | null>(null);
@@ -48,7 +49,6 @@ export default function SettingsScreen() {
       await Clipboard.setStringAsync(code);
       showAlert('Exported', 'Save code copied to clipboard.');
     } catch {
-      // Clipboard may not be available on all platforms
       showAlert('Exported', 'Copy the code below manually.');
     }
   };
@@ -82,6 +82,20 @@ export default function SettingsScreen() {
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
       <Text style={styles.title}>Settings</Text>
+
+      {/* Developer / Testing */}
+      <Text style={styles.sectionTitle}>Developer</Text>
+      <TouchableOpacity
+        style={[styles.button, unlockAllLevels && styles.activeButton]}
+        onPress={toggleUnlockAllLevels}
+      >
+        <Text style={[styles.buttonText, unlockAllLevels && styles.activeButtonText]}>
+          {unlockAllLevels ? 'All Levels Unlocked ✓' : 'Unlock All Levels'}
+        </Text>
+      </TouchableOpacity>
+      <Text style={styles.hint}>
+        Bypass Level 1 Stage 11 requirement to access Levels 2–5.
+      </Text>
 
       {/* Export */}
       <Text style={styles.sectionTitle}>Export Progress</Text>
@@ -153,6 +167,8 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   buttonText: { fontSize: 15, fontWeight: '600', color: '#00d4ff' },
+  activeButton: { backgroundColor: '#0a2a1a', borderWidth: 1, borderColor: '#00e676' },
+  activeButtonText: { color: '#00e676' },
   dangerButton: { backgroundColor: '#2a1014' },
   dangerText: { color: '#ff4455' },
   codeBox: {

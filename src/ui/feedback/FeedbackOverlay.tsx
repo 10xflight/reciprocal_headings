@@ -1,15 +1,5 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
-import Animated, {
-  SharedValue,
-  useSharedValue,
-  useAnimatedStyle,
-  withTiming,
-  withSequence,
-  withDelay,
-  runOnJS,
-  Easing,
-} from 'react-native-reanimated';
 import { CompassDirection, FeedbackState, TIMING } from '../../core/types';
 
 interface FeedbackOverlayProps {
@@ -31,81 +21,49 @@ const TEXT_COLORS: Record<FeedbackState, string> = {
   red: '#ff1744',
 };
 
+const DISPLAY_DURATION = 1000; // ms to show feedback
+
 export default function FeedbackOverlay({
   state,
   correctAnswer,
   message,
   onAnimationComplete,
 }: FeedbackOverlayProps) {
-  const opacity = useSharedValue(0);
-  const translateX = useSharedValue(0);
+  const [visible, setVisible] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const callbackRef = useRef(onAnimationComplete);
+  callbackRef.current = onAnimationComplete;
 
   useEffect(() => {
-    if (!state) return;
-
-    if (state === 'red') {
-      // Shake animation
-      translateX.value = withSequence(
-        withTiming(12, { duration: 50 }),
-        withTiming(-12, { duration: 50 }),
-        withTiming(8, { duration: 50 }),
-        withTiming(-8, { duration: 50 }),
-        withTiming(0, { duration: 50 }),
-      );
+    if (!state) {
+      setVisible(false);
+      return;
     }
 
-    // Fade in, hold, fade out
-    const fadeIn = state === 'green' ? 200 : 300;
-    const hold = TIMING.INTER_REP_DELAY - fadeIn - 200;
+    setVisible(true);
 
-    opacity.value = withSequence(
-      withTiming(1, { duration: fadeIn, easing: Easing.out(Easing.ease) }),
-      withDelay(hold, withTiming(0, { duration: 200 }, (finished) => {
-        if (finished) {
-          runOnJS(onAnimationComplete)();
-        }
-      })),
-    );
-  }, [state, opacity, translateX, onAnimationComplete]);
+    // Clear any existing timer
+    if (timerRef.current) clearTimeout(timerRef.current);
 
-  if (!state) return null;
+    // Auto-dismiss after duration, then call onAnimationComplete
+    timerRef.current = setTimeout(() => {
+      setVisible(false);
+      callbackRef.current();
+    }, DISPLAY_DURATION);
 
-  return (
-    <AnimatedOverlay
-      opacity={opacity}
-      translateX={translateX}
-      state={state}
-      correctAnswer={correctAnswer}
-      message={message}
-    />
-  );
-}
+    return () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    };
+  }, [state]);
 
-function AnimatedOverlay({
-  opacity,
-  translateX,
-  state,
-  correctAnswer,
-  message,
-}: {
-  opacity: SharedValue<number>;
-  translateX: SharedValue<number>;
-  state: FeedbackState;
-  correctAnswer?: { reciprocal: string; direction: CompassDirection };
-  message?: string;
-}) {
-  const bgStyle = useAnimatedStyle(() => ({
-    opacity: opacity.value,
-  }));
-
-  const contentStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: translateX.value }],
-  }));
+  if (!state || !visible) return null;
 
   return (
-    <Animated.View style={[styles.overlay, { backgroundColor: COLORS[state] }, bgStyle]}>
-      <Animated.View style={[styles.content, contentStyle]}>
-        {state === 'green' && <Text style={[styles.icon, { color: TEXT_COLORS.green }]}>✓</Text>}
+    <View style={[styles.overlay, { backgroundColor: COLORS[state] }]} pointerEvents="none">
+      <View style={styles.content}>
+        {state === 'green' && (
+          <Text style={[styles.icon, { color: TEXT_COLORS.green }]}>✓</Text>
+        )}
 
         {state === 'amber' && (
           <Text style={[styles.message, { color: TEXT_COLORS.amber }]}>
@@ -123,8 +81,8 @@ function AnimatedOverlay({
             </Text>
           </View>
         )}
-      </Animated.View>
-    </Animated.View>
+      </View>
+    </View>
   );
 }
 

@@ -1,6 +1,5 @@
 import { useStore } from '../../src/state/store';
 
-// Reset store between tests
 beforeEach(() => {
   useStore.getState().resetProgress();
 });
@@ -8,110 +7,106 @@ beforeEach(() => {
 describe('Zustand store', () => {
   test('initial state', () => {
     const state = useStore.getState();
-    expect(state.unlockedIndex).toBe(0);
+    expect(state.currentStage).toBe(1);
+    expect(state.completedStages).toEqual([]);
     expect(state.stats.totalReps).toBe(0);
-    expect(Object.keys(state.levels)).toHaveLength(5);
   });
 
-  test('recordResult updates level progress', () => {
-    const { recordResult } = useStore.getState();
-    recordResult(1, '36', 'green', 500);
-
+  test('completeStage advances currentStage', () => {
+    useStore.getState().completeStage(1);
     const state = useStore.getState();
-    expect(state.levels[1]['36']).toBeDefined();
-    expect(state.levels[1]['36'].consecutiveGreens).toBe(1);
-    expect(state.levels[1]['36'].stability).toBe(0);
-    expect(state.stats.totalReps).toBe(1);
-    expect(state.stats.totalTimeMs).toBe(500);
+    expect(state.completedStages).toContain(1);
+    expect(state.currentStage).toBe(2);
   });
 
-  test('3 consecutive greens sets stability to 3', () => {
-    const { recordResult } = useStore.getState();
-    recordResult(1, '36', 'green', 500);
-    recordResult(1, '36', 'green', 400);
-    recordResult(1, '36', 'green', 300);
-
-    const state = useStore.getState();
-    expect(state.levels[1]['36'].stability).toBe(3);
-    expect(state.levels[1]['36'].consecutiveGreens).toBe(3);
+  test('completeStage is idempotent', () => {
+    useStore.getState().completeStage(1);
+    useStore.getState().completeStage(1);
+    expect(useStore.getState().completedStages.filter((s) => s === 1)).toHaveLength(1);
   });
 
-  test('red resets stability and consecutiveGreens', () => {
-    const { recordResult } = useStore.getState();
-    recordResult(1, '36', 'green', 500);
-    recordResult(1, '36', 'green', 500);
-    recordResult(1, '36', 'red', 500);
-
-    const state = useStore.getState();
-    expect(state.levels[1]['36'].stability).toBe(0);
-    expect(state.levels[1]['36'].consecutiveGreens).toBe(0);
+  test('completeStage does not exceed 11', () => {
+    useStore.getState().completeStage(11);
+    expect(useStore.getState().currentStage).toBe(11);
   });
 
-  test('amber does not change progress', () => {
-    const { recordResult } = useStore.getState();
-    recordResult(1, '36', 'green', 500);
-    recordResult(1, '36', 'amber', 1200);
-
-    const state = useStore.getState();
-    expect(state.levels[1]['36'].consecutiveGreens).toBe(1);
-    expect(state.levels[1]['36'].stability).toBe(0);
+  test('saveTrialResult stores best time', () => {
+    useStore.getState().saveTrialResult(1, {
+      trialId: 'test-1',
+      time: 5000,
+      mistakes: 2,
+      headingsPerMinute: 72,
+    });
+    const best = useStore.getState().trialBestTimes['1'];
+    expect(best).toBeDefined();
+    expect(best.time).toBe(5000);
   });
 
-  test('streak tracking', () => {
-    const { recordResult } = useStore.getState();
-    recordResult(1, '36', 'green', 500);
-    recordResult(1, '36', 'green', 500);
-    recordResult(1, '36', 'green', 500);
-
-    expect(useStore.getState().stats.currentStreak).toBe(3);
-    expect(useStore.getState().stats.bestStreak).toBe(3);
-
-    recordResult(1, '36', 'red', 500);
-    expect(useStore.getState().stats.currentStreak).toBe(0);
-    expect(useStore.getState().stats.bestStreak).toBe(3);
+  test('saveTrialResult keeps better time', () => {
+    useStore.getState().saveTrialResult(1, {
+      trialId: 'test-1',
+      time: 5000,
+      mistakes: 2,
+      headingsPerMinute: 72,
+    });
+    useStore.getState().saveTrialResult(1, {
+      trialId: 'test-2',
+      time: 3000,
+      mistakes: 0,
+      headingsPerMinute: 120,
+    });
+    expect(useStore.getState().trialBestTimes['1'].time).toBe(3000);
   });
 
-  test('levels are independent', () => {
-    const { recordResult } = useStore.getState();
-    recordResult(1, '36', 'green', 500);
-    recordResult(2, '36', 'red', 500);
-
-    const state = useStore.getState();
-    expect(state.levels[1]['36'].consecutiveGreens).toBe(1);
-    expect(state.levels[2]['36'].consecutiveGreens).toBe(0);
+  test('saveTrialResult does not overwrite with worse time', () => {
+    useStore.getState().saveTrialResult(1, {
+      trialId: 'test-1',
+      time: 3000,
+      mistakes: 0,
+      headingsPerMinute: 120,
+    });
+    useStore.getState().saveTrialResult(1, {
+      trialId: 'test-2',
+      time: 5000,
+      mistakes: 2,
+      headingsPerMinute: 72,
+    });
+    expect(useStore.getState().trialBestTimes['1'].time).toBe(3000);
   });
 
   test('export and import round-trip', () => {
-    const { recordResult } = useStore.getState();
-    recordResult(1, '36', 'green', 500);
-    recordResult(1, '36', 'green', 400);
-    recordResult(1, '36', 'green', 300);
+    useStore.getState().completeStage(1);
+    useStore.getState().completeStage(2);
+    useStore.getState().saveTrialResult(1, {
+      trialId: 'test-1',
+      time: 5000,
+      mistakes: 1,
+      headingsPerMinute: 72,
+    });
 
     const exported = useStore.getState().exportState();
-
     useStore.getState().resetProgress();
-    expect(useStore.getState().levels[1]['36']).toBeUndefined();
+    expect(useStore.getState().completedStages).toEqual([]);
 
     const success = useStore.getState().importState(exported);
     expect(success).toBe(true);
-    expect(useStore.getState().levels[1]['36'].stability).toBe(3);
-    expect(useStore.getState().stats.totalReps).toBe(3);
+    expect(useStore.getState().completedStages).toContain(1);
+    expect(useStore.getState().completedStages).toContain(2);
+    expect(useStore.getState().trialBestTimes['1'].time).toBe(5000);
   });
 
   test('import rejects invalid data', () => {
     expect(useStore.getState().importState('not-base64!')).toBe(false);
     expect(useStore.getState().importState(btoa('{}'))).toBe(false);
-    expect(useStore.getState().importState(btoa('{"unlockedIndex":"bad"}'))).toBe(false);
   });
 
   test('resetProgress clears everything', () => {
-    const { recordResult, resetProgress } = useStore.getState();
-    recordResult(1, '36', 'green', 500);
-    resetProgress();
+    useStore.getState().completeStage(1);
+    useStore.getState().resetProgress();
 
     const state = useStore.getState();
+    expect(state.currentStage).toBe(1);
+    expect(state.completedStages).toEqual([]);
     expect(state.stats.totalReps).toBe(0);
-    expect(state.unlockedIndex).toBe(0);
-    expect(Object.keys(state.levels[1])).toHaveLength(0);
   });
 });

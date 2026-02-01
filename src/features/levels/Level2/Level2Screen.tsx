@@ -1,37 +1,70 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
 import Numpad from '../../numpad/Numpad';
 import HeadingDisplay from '../../stimulus/HeadingDisplay';
 import FeedbackOverlay from '../../../ui/feedback/FeedbackOverlay';
-import { SessionManager } from '../../../state/sessionManager';
-import { useStore } from '../../../state/store';
 import { FeedbackState, TIMING, ValidationResult } from '../../../core/types';
+import { HEADING_PACKETS } from '../../../core/data/headingPackets';
+import { calculateReciprocal, getDirection } from '../../../core/algorithms/reciprocal';
+
+const ALL_HEADINGS = Object.keys(HEADING_PACKETS);
+
+function randomHeading(): string {
+  return ALL_HEADINGS[Math.floor(Math.random() * ALL_HEADINGS.length)];
+}
 
 export default function Level2Screen() {
-  const recordResult = useStore((s) => s.recordResult);
-
-  const sessionRef = useRef<SessionManager>(new SessionManager(2));
-  const [heading, setHeading] = useState(() => sessionRef.current.getNextHeading());
+  const [heading, setHeading] = useState(() => randomHeading());
   const [input, setInput] = useState('');
   const [feedback, setFeedback] = useState<{
     state: FeedbackState;
     result: ValidationResult;
   } | null>(null);
   const [disabled, setDisabled] = useState(false);
+  const [streak, setStreak] = useState(0);
+  const [repsCount, setRepsCount] = useState(0);
+  const timerRef = useRef(0);
 
   useEffect(() => {
-    sessionRef.current.startTimer();
+    timerRef.current = Date.now();
   }, [heading]);
 
   // Auto-submit on 2nd digit
   useEffect(() => {
     if (input.length === 2 && !disabled) {
       setDisabled(true);
-      const result = sessionRef.current.submitResponse(input);
-      recordResult(2, sessionRef.current.getCurrentBaseHeading(), result.state, sessionRef.current.getTimeElapsed());
-      setFeedback({ state: result.state, result });
+      const timeMs = Date.now() - timerRef.current;
+      const expected = calculateReciprocal(heading);
+      const expectedDir = getDirection(heading);
+      const isCorrect = input === expected;
+
+      let state: FeedbackState;
+      let feedbackMsg: string | undefined;
+      if (!isCorrect) {
+        state = 'red';
+      } else if (timeMs > TIMING.LEVEL1_LIMIT) {
+        state = 'amber';
+        feedbackMsg = 'Too Slow';
+      } else {
+        state = 'green';
+      }
+
+      const result: ValidationResult = {
+        isCorrect,
+        state,
+        feedback: feedbackMsg,
+        correctAnswer: { reciprocal: expected, direction: expectedDir },
+      };
+
+      setRepsCount((c) => c + 1);
+      if (state === 'green') {
+        setStreak((s) => s + 1);
+      } else {
+        setStreak(0);
+      }
+      setFeedback({ state, result });
     }
-  }, [input, disabled, recordResult]);
+  }, [input, disabled, heading]);
 
   const handleDigit = useCallback(
     (digit: string) => {
@@ -54,8 +87,7 @@ export default function Level2Screen() {
   const handleFeedbackComplete = useCallback(() => {
     setFeedback(null);
     setTimeout(() => {
-      const next = sessionRef.current.getNextHeading();
-      setHeading(next);
+      setHeading(randomHeading());
       setInput('');
       setDisabled(false);
     }, TIMING.INTER_REP_DELAY);
@@ -64,6 +96,10 @@ export default function Level2Screen() {
   return (
     <View style={styles.container}>
       <Text style={styles.levelLabel}>Level 2 — Reciprocal Packets</Text>
+      <View style={styles.statsRow}>
+        <Text style={styles.statText}>Streak: {streak}</Text>
+        <Text style={styles.statText}>Reps: {repsCount}</Text>
+      </View>
       <HeadingDisplay heading={heading} />
       <Numpad
         onDigit={handleDigit}
@@ -94,6 +130,15 @@ const styles = StyleSheet.create({
     color: '#00d4ff',
     fontWeight: '600',
     letterSpacing: 1,
-    marginBottom: 8,
+    marginBottom: 4,
+  },
+  statsRow: {
+    flexDirection: 'row',
+    gap: 20,
+    marginBottom: 4,
+  },
+  statText: {
+    fontSize: 13,
+    color: '#667788',
   },
 });

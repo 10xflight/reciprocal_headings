@@ -10,7 +10,7 @@ describe('validateResponse', () => {
     });
 
     test('correct wedge over time → amber', () => {
-      const result = validateResponse(1, '04', 1, 1200);
+      const result = validateResponse(1, '04', 1, 2100);
       expect(result.state).toBe('amber');
       expect(result.isCorrect).toBe(true);
       expect(result.feedback).toBe('Too Slow');
@@ -23,12 +23,12 @@ describe('validateResponse', () => {
     });
 
     test('boundary: exactly at time limit → green', () => {
-      const result = validateResponse(1, '04', 1, 1000);
+      const result = validateResponse(1, '04', 1, 2000);
       expect(result.state).toBe('green');
     });
 
     test('boundary: 1ms over time limit → amber', () => {
-      const result = validateResponse(1, '04', 1, 1001);
+      const result = validateResponse(1, '04', 1, 2001);
       expect(result.state).toBe('amber');
     });
   });
@@ -45,7 +45,7 @@ describe('validateResponse', () => {
     });
 
     test('correct but slow → amber', () => {
-      const result = validateResponse(2, '04', '22', 1500);
+      const result = validateResponse(2, '04', '22', 2100);
       expect(result.state).toBe('amber');
     });
 
@@ -72,13 +72,13 @@ describe('validateResponse', () => {
       expect(result.state).toBe('red');
     });
 
-    test('correct but over 1500ms → amber', () => {
-      const result = validateResponse(3, '04', { number: '22', direction: 'North East' }, 1600);
+    test('correct but over 2000ms → amber', () => {
+      const result = validateResponse(3, '04', { number: '22', direction: 'North East' }, 2100);
       expect(result.state).toBe('amber');
     });
 
-    test('time limit is 1500ms (not 1000ms)', () => {
-      const result = validateResponse(3, '04', { number: '22', direction: 'North East' }, 1400);
+    test('time limit is 2000ms', () => {
+      const result = validateResponse(3, '04', { number: '22', direction: 'North East' }, 1900);
       expect(result.state).toBe('green');
     });
   });

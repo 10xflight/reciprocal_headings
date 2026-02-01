@@ -21,7 +21,7 @@ export function validateResponse(
   response: number | string | VoiceResponse,
   responseTimeMs: number,
 ): ValidationResult {
-  const timeLimit = level <= 2 ? TIMING.NON_VERBAL_LIMIT : TIMING.VERBAL_LIMIT;
+  const timeLimit = TIMING.LEVEL1_LIMIT;
 
   const expectedReciprocal =
     level === 5 ? calculateReciprocalWithOnes(stimulus) : calculateReciprocal(stimulus);

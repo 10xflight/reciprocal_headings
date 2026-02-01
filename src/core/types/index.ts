@@ -31,24 +31,13 @@ export interface ValidationResult {
   correctAnswer?: { reciprocal: string; direction: CompassDirection };
 }
 
-export interface QueueItem {
-  headingId: string;
-  stability: number;
-  consecutiveGreens: number;
-  lastResult: FeedbackState | null;
-}
+export type TrainingGrade = 'fast' | 'slow' | 'wrong';
 
-export interface SnowballState {
-  activeQueue: QueueItem[];
-  unlockedIndex: number;
-}
-
-export interface LevelProgress {
-  [headingId: string]: {
-    stability: number;
-    consecutiveGreens: number;
-    lastAttempt: number;
-  };
+export interface TrialResult {
+  trialId: string;
+  time: number;
+  mistakes: number;
+  headingsPerMinute: number;
 }
 
 export interface UserStats {
@@ -58,14 +47,7 @@ export interface UserStats {
   currentStreak: number;
 }
 
-export interface AppState {
-  unlockedIndex: number;
-  levels: Record<number, LevelProgress>;
-  stats: UserStats;
-}
-
 export const TIMING = {
-  NON_VERBAL_LIMIT: 1000,
-  VERBAL_LIMIT: 1500,
+  LEVEL1_LIMIT: 2000,
   INTER_REP_DELAY: 1000,
 } as const;
