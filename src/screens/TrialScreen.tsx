@@ -5,12 +5,11 @@ import CompassRose from '../features/compass/CompassRose';
 import HeadingDisplay from '../features/stimulus/HeadingDisplay';
 import FeedbackOverlay from '../ui/feedback/FeedbackOverlay';
 import CountdownTimer from '../ui/CountdownTimer';
-import { TrialEngine, getStageHeadings } from '../core/algorithms/trainingEngine';
+import { TrialEngine } from '../core/algorithms/trainingEngine';
 import { SessionManager } from '../state/sessionManager';
 import { useStore } from '../state/store';
 import { FeedbackState, TIMING, ValidationResult } from '../core/types';
 import { HEADING_PACKETS } from '../core/data/headingPackets';
-import { getStageName } from '../core/algorithms/trainingEngine';
 import { RootStackParamList } from '../navigation/AppNavigator';
 
 type TrialPhase = 'idle' | 'countdown' | 'active' | 'complete';
@@ -18,11 +17,10 @@ type TrialPhase = 'idle' | 'countdown' | 'active' | 'complete';
 export default function TrialScreen() {
   const route = useRoute<RouteProp<RootStackParamList, 'Trial'>>();
   const navigation = useNavigation();
-  const stage = route.params.stage;
+  const headingIds = route.params.headingIds;
   const saveTrialResult = useStore((s) => s.saveTrialResult);
 
-  const headings = getStageHeadings(stage);
-  const engineRef = useRef<TrialEngine>(new TrialEngine(headings));
+  const engineRef = useRef<TrialEngine>(new TrialEngine(headingIds));
   const sessionRef = useRef<SessionManager>(new SessionManager(engineRef.current));
   const trialStartRef = useRef(0);
 
@@ -37,7 +35,7 @@ export default function TrialScreen() {
   const [highlightColor, setHighlightColor] = useState<FeedbackState | undefined>(undefined);
   const [repKey, setRepKey] = useState(0);
   const [showHeading, setShowHeading] = useState(false);
-  const [remaining, setRemaining] = useState(headings.length);
+  const [remaining, setRemaining] = useState(headingIds.length);
   const [mistakes, setMistakes] = useState(0);
   const [timerRunning, setTimerRunning] = useState(false);
   const [frozenTime, setFrozenTime] = useState<number | null>(null);
@@ -68,11 +66,11 @@ export default function TrialScreen() {
   }, [repKey, phase]);
 
   const startTrial = useCallback(() => {
-    engineRef.current = new TrialEngine(headings);
+    engineRef.current = new TrialEngine(headingIds);
     sessionRef.current = new SessionManager(engineRef.current);
     setPhase('countdown');
     setMistakes(0);
-    setRemaining(headings.length);
+    setRemaining(headingIds.length);
     setDisabled(false);
     setTrialElapsed(0);
 
@@ -83,7 +81,7 @@ export default function TrialScreen() {
       setShowHeading(true);
       setPhase('active');
     }, 1000);
-  }, [headings]);
+  }, [headingIds]);
 
   const handleTimeout = useCallback(() => {
     if (disabled || phase !== 'active') return;
@@ -92,7 +90,7 @@ export default function TrialScreen() {
     setTimerRunning(false);
     setFrozenTime(TIMING.LEVEL1_LIMIT);
 
-    const { result } = sessionRef.current.submitResponse(-1);
+    const { result } = sessionRef.current.submitResponseTrial(-1);
     const correctWedge = HEADING_PACKETS[heading]?.wedgeId;
     setHighlightWedge(correctWedge);
     setHighlightColor('red');
@@ -111,7 +109,7 @@ export default function TrialScreen() {
       setTimerRunning(false);
       setFrozenTime(elapsed);
 
-      const { result, grade } = sessionRef.current.submitResponse(wedgeId);
+      const { result, grade } = sessionRef.current.submitResponseTrial(wedgeId);
       const correctWedge = HEADING_PACKETS[heading]?.wedgeId;
 
       setHighlightWedge(correctWedge);
@@ -136,9 +134,9 @@ export default function TrialScreen() {
       if (trialRafRef.current != null) cancelAnimationFrame(trialRafRef.current);
       setTrialElapsed(totalTime);
 
-      const hpm = (headings.length / (totalTime / 60000));
-      saveTrialResult(stage, {
-        trialId: `stage-${stage}-${Date.now()}`,
+      const hpm = (headingIds.length / (totalTime / 60000));
+      saveTrialResult('all', {
+        trialId: `trial-${Date.now()}`,
         time: totalTime,
         mistakes: engineRef.current.getMistakes(),
         headingsPerMinute: hpm,
@@ -154,16 +152,14 @@ export default function TrialScreen() {
       setRepKey((k) => k + 1);
       setDisabled(false);
     }, TIMING.INTER_REP_DELAY);
-  }, [headings.length, saveTrialResult, stage]);
-
-  const stageName = getStageName(stage);
+  }, [headingIds.length, saveTrialResult]);
 
   if (phase === 'idle') {
     return (
       <View style={styles.container}>
-        <Text style={styles.title}>Trial — {stageName}</Text>
+        <Text style={styles.title}>Trial Mode</Text>
         <Text style={styles.description}>
-          Eliminate all {headings.length} headings as fast as you can.{'\n'}
+          Eliminate all {headingIds.length} headings as fast as you can.{'\n'}
           Only fast + correct answers remove a heading.
         </Text>
         <Pressable style={styles.primaryBtn} onPress={startTrial}>
@@ -175,7 +171,7 @@ export default function TrialScreen() {
 
   if (phase === 'complete') {
     const totalSecs = trialElapsed / 1000;
-    const hpm = (headings.length / (trialElapsed / 60000));
+    const hpm = (headingIds.length / (trialElapsed / 60000));
     return (
       <View style={styles.container}>
         <Text style={styles.title}>Trial Complete!</Text>
@@ -197,7 +193,7 @@ export default function TrialScreen() {
   if (phase === 'countdown') {
     return (
       <View style={styles.container}>
-        <Text style={styles.title}>Trial — {stageName}</Text>
+        <Text style={styles.title}>Trial Mode</Text>
         <Text style={styles.getReady}>Get Ready...</Text>
         <CompassRose onWedgeTap={() => {}} disabled={true} size={300} />
       </View>
@@ -214,7 +210,7 @@ export default function TrialScreen() {
       />
 
       <View style={styles.topBar}>
-        <Text style={styles.topTitle}>Trial — {stageName}</Text>
+        <Text style={styles.topTitle}>Trial Mode</Text>
         <Text style={styles.timerText}>{(trialElapsed / 1000).toFixed(1)}s</Text>
       </View>
 

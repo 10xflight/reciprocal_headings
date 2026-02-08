@@ -1,13 +1,16 @@
-import { LearningEngine, TrialEngine, gradeResponse, TrainingGrade } from '../core/algorithms/trainingEngine';
+import { DeckEngine, TrialEngine, MasteryChallengeEngine, gradeResponse, TrainingGrade, RecordResultOutput } from '../core/algorithms/trainingEngine';
+import { FocusDeckEngine } from '../core/algorithms/focusDeckEngine';
 import { validateResponse } from '../core/algorithms/validator';
 import { ValidationResult, TIMING } from '../core/types';
 
+type AnyEngine = DeckEngine | TrialEngine | MasteryChallengeEngine | FocusDeckEngine;
+
 export class SessionManager {
-  private engine: LearningEngine | TrialEngine;
+  private engine: AnyEngine;
   private currentHeading: string = '';
   private responseStartTime: number = 0;
 
-  constructor(engine: LearningEngine | TrialEngine) {
+  constructor(engine: AnyEngine) {
     this.engine = engine;
   }
 
@@ -28,17 +31,27 @@ export class SessionManager {
     return Date.now() - this.responseStartTime;
   }
 
-  submitResponse(response: number): { result: ValidationResult; grade: TrainingGrade } {
+  submitResponseDeck(wedgeId: number, totalElapsed: number): { result: ValidationResult; engineResult: RecordResultOutput } {
+    const result = validateResponse(1, this.currentHeading, wedgeId, totalElapsed);
+    const engineResult = (this.engine as DeckEngine).recordResult(this.currentHeading, totalElapsed, result.isCorrect);
+    return { result, engineResult };
+  }
+
+  submitResponseTrial(wedgeId: number): { result: ValidationResult; grade: TrainingGrade } {
     const timeMs = this.getTimeElapsed();
-    const result = validateResponse(1, this.currentHeading, response, timeMs);
+    const result = validateResponse(1, this.currentHeading, wedgeId, timeMs);
     const grade = gradeResponse(result.isCorrect, timeMs, TIMING.LEVEL1_LIMIT);
-
-    this.engine.recordResult(this.currentHeading, grade);
-
+    (this.engine as TrialEngine).recordResult(this.currentHeading, grade);
     return { result, grade };
   }
 
-  getEngine(): LearningEngine | TrialEngine {
+  submitResponseFocusDeck(wedgeId: number, totalElapsed: number): { result: ValidationResult; engineResult: RecordResultOutput } {
+    const result = validateResponse(1, this.currentHeading, wedgeId, totalElapsed);
+    const engineResult = (this.engine as FocusDeckEngine).recordResult(this.currentHeading, totalElapsed, result.isCorrect);
+    return { result, engineResult };
+  }
+
+  getEngine(): AnyEngine {
     return this.engine;
   }
 }

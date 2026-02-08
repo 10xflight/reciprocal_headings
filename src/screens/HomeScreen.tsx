@@ -4,10 +4,10 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import { useStore } from '../state/store';
-import { getStageName, STAGES, SETS } from '../core/algorithms/trainingEngine';
+import { MASTER_SEQUENCE } from '../core/algorithms/trainingEngine';
 
 const LEVEL_INFO = [
-  { id: 2, name: 'Reciprocal Packets', description: 'Type the reciprocal', route: 'Practice2' as const },
+  { id: 2, name: 'Reciprocal Packets', description: 'Type the reciprocal', route: 'Level2Mode' as const },
   { id: 3, name: 'Vector Orientation', description: 'Say the full packet', route: 'Practice3' as const },
   { id: 4, name: 'Auditory Vector Sense', description: 'Listen and respond', route: 'Practice4' as const },
   { id: 5, name: 'Single Digit Resolution', description: 'Full 3-digit headings', route: 'Practice5' as const },
@@ -15,109 +15,77 @@ const LEVEL_INFO = [
 
 export default function HomeScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const currentStage = useStore((s) => s.currentStage);
-  const completedStages = useStore((s) => s.completedStages);
-  const trialBestTimes = useStore((s) => s.trialBestTimes);
+  const deckProgress = useStore((s) => s.deckProgress);
+  const level2Progress = useStore((s) => s.level2DeckProgress);
   const unlockAllLevels = useStore((s) => s.unlockAllLevels);
 
-  const allStage11Complete = completedStages.includes(11);
-  const levelsUnlocked = unlockAllLevels || allStage11Complete;
+  const unlockedCount = deckProgress.unlockedCount;
+  const allComplete = unlockedCount >= 36;
+  const level2Complete = level2Progress.unlockedCount >= 36;
+  // Levels 3-5 require completing Level 1 OR dev mode; Level 2 is always available
+  const levels35Unlocked = unlockAllLevels || allComplete;
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
-      {/* Level 1: Learning Mode */}
-      <Text style={styles.sectionTitle}>Level 1 — Vector Anchoring</Text>
-      <Text style={styles.sectionHint}>Tap the compass wedge where each heading belongs</Text>
+      {/* Level 1 */}
+      <TouchableOpacity
+        style={styles.card}
+        activeOpacity={0.7}
+        onPress={() => navigation.navigate('Level1Menu')}
+      >
+        <View style={styles.cardHeader}>
+          <Text style={styles.stageName}>Level 1 — Vector Anchoring</Text>
+          {allComplete && <Text style={styles.checkmark}>✓</Text>}
+        </View>
+        <Text style={styles.cardDetail}>
+          {(deckProgress.masteredHeadings || []).length}/36 Headings Mastered
+        </Text>
+        <View style={styles.progressBarBg}>
+          <View style={[styles.progressBarFill, { width: `${((deckProgress.masteredHeadings || []).length / 36) * 100}%` }]} />
+        </View>
+      </TouchableOpacity>
 
-      {STAGES.map((_, idx) => {
-        const stage = idx + 1;
-        const isUnlocked = stage <= currentStage;
-        const isCompleted = completedStages.includes(stage);
-        const name = getStageName(stage);
-        const headingCount = STAGES[idx].reduce((sum, si) => sum + SETS[si].length, 0);
+      {/* Level 2 - Always available, separate progress */}
+      <TouchableOpacity
+        style={[styles.card, styles.levelCard]}
+        activeOpacity={0.7}
+        onPress={() => navigation.navigate('Level2Mode')}
+      >
+        <View style={styles.cardHeader}>
+          <Text style={styles.stageName}>Level 2 — Reciprocal Packets</Text>
+          {level2Complete && <Text style={styles.checkmark}>✓</Text>}
+        </View>
+        <Text style={styles.cardDetail}>
+          {(level2Progress.masteredHeadings || []).length}/36 Headings Mastered
+        </Text>
+        <View style={styles.progressBarBg}>
+          <View style={[styles.progressBarFill, { width: `${((level2Progress.masteredHeadings || []).length / 36) * 100}%`, backgroundColor: '#aa66ff' }]} />
+        </View>
+      </TouchableOpacity>
 
-        return (
-          <TouchableOpacity
-            key={stage}
-            style={[styles.card, !isUnlocked && styles.cardLocked]}
-            activeOpacity={isUnlocked ? 0.7 : 1}
-            onPress={() => isUnlocked && navigation.navigate('Learning', { stage })}
-            disabled={!isUnlocked}
-          >
-            <View style={styles.cardHeader}>
-              <Text style={[styles.stageName, !isUnlocked && styles.textLocked]}>
-                {name}
-              </Text>
-              {isCompleted && <Text style={styles.checkmark}>✓</Text>}
-              {!isUnlocked && <Text style={styles.lockIcon}>🔒</Text>}
-            </View>
-            <Text style={[styles.cardDetail, !isUnlocked && styles.textLocked]}>
-              {headingCount} headings
-            </Text>
-          </TouchableOpacity>
-        );
-      })}
-
-      {/* Level 1: Trial Mode */}
-      <Text style={[styles.sectionTitle, { marginTop: 24 }]}>Level 1 — Trials</Text>
-      <Text style={styles.sectionHint}>Speed run — eliminate all headings as fast as possible</Text>
-
-      {STAGES.map((_, idx) => {
-        const stage = idx + 1;
-        const isUnlocked = completedStages.includes(stage);
-        const bestResult = trialBestTimes[String(stage)];
-        const name = getStageName(stage);
-
-        return (
-          <TouchableOpacity
-            key={`trial-${stage}`}
-            style={[styles.card, styles.trialCard, !isUnlocked && styles.cardLocked]}
-            activeOpacity={isUnlocked ? 0.7 : 1}
-            onPress={() => isUnlocked && navigation.navigate('Trial', { stage })}
-            disabled={!isUnlocked}
-          >
-            <View style={styles.cardHeader}>
-              <Text style={[styles.stageName, !isUnlocked && styles.textLocked]}>
-                {name}
-              </Text>
-              {!isUnlocked && <Text style={styles.lockIcon}>🔒</Text>}
-            </View>
-            {bestResult ? (
-              <Text style={styles.bestTime}>
-                Best: {(bestResult.time / 1000).toFixed(1)}s · {bestResult.mistakes} mistakes · {bestResult.headingsPerMinute.toFixed(0)} h/min
-              </Text>
-            ) : (
-              <Text style={[styles.cardDetail, !isUnlocked && styles.textLocked]}>
-                {isUnlocked ? 'Not attempted' : 'Complete learning stage to unlock'}
-              </Text>
-            )}
-          </TouchableOpacity>
-        );
-      })}
-
-      {/* Levels 2-5 */}
-      <Text style={[styles.sectionTitle, { marginTop: 32 }]}>Levels 2–5</Text>
+      {/* Levels 3-5 */}
+      <Text style={[styles.sectionTitle, { marginTop: 32 }]}>Levels 3–5</Text>
       <Text style={styles.sectionHint}>
-        {levelsUnlocked
-          ? 'Practice reciprocal recall with different input methods'
-          : 'Complete Level 1 Stage 11 to unlock (or enable in Settings)'}
+        {levels35Unlocked
+          ? 'Practice reciprocal recall with voice input'
+          : 'Master all 36 headings in Level 1 to unlock (or enable in Settings)'}
       </Text>
 
-      {LEVEL_INFO.map((level) => (
+      {LEVEL_INFO.filter(l => l.id >= 3).map((level) => (
         <TouchableOpacity
           key={level.id}
-          style={[styles.card, styles.levelCard, !levelsUnlocked && styles.cardLocked]}
-          activeOpacity={levelsUnlocked ? 0.7 : 1}
-          onPress={() => levelsUnlocked && navigation.navigate(level.route)}
-          disabled={!levelsUnlocked}
+          style={[styles.card, styles.levelCard, !levels35Unlocked && styles.cardLocked]}
+          activeOpacity={levels35Unlocked ? 0.7 : 1}
+          onPress={() => levels35Unlocked && navigation.navigate(level.route)}
+          disabled={!levels35Unlocked}
         >
           <View style={styles.cardHeader}>
-            <Text style={[styles.stageName, !levelsUnlocked && styles.textLocked]}>
+            <Text style={[styles.stageName, !levels35Unlocked && styles.textLocked]}>
               Level {level.id} — {level.name}
             </Text>
-            {!levelsUnlocked && <Text style={styles.lockIcon}>🔒</Text>}
+            {!levels35Unlocked && <Text style={styles.lockIcon}>🔒</Text>}
           </View>
-          <Text style={[styles.cardDetail, !levelsUnlocked && styles.textLocked]}>
+          <Text style={[styles.cardDetail, !levels35Unlocked && styles.textLocked]}>
             {level.description}
           </Text>
         </TouchableOpacity>
@@ -163,9 +131,6 @@ const styles = StyleSheet.create({
     borderLeftWidth: 4,
     borderLeftColor: '#00d4ff',
   },
-  trialCard: {
-    borderLeftColor: '#ffab00',
-  },
   levelCard: {
     borderLeftColor: '#aa66ff',
   },
@@ -195,12 +160,21 @@ const styles = StyleSheet.create({
   cardDetail: {
     fontSize: 13,
     color: '#aaa',
-  },
-  bestTime: {
-    fontSize: 13,
-    color: '#00e676',
+    marginBottom: 8,
   },
   textLocked: {
     color: '#555',
+  },
+  progressBarBg: {
+    width: '100%',
+    height: 4,
+    backgroundColor: '#2a2a3e',
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: 4,
+    backgroundColor: '#00d4ff',
+    borderRadius: 2,
   },
 });

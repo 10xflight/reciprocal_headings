@@ -9,6 +9,10 @@ interface CountdownTimerProps {
   duration?: number;
   /** Set to resume the timer from a specific elapsed value (e.g. after pause) */
   resumeFrom?: number | null;
+  /** Override the stroke color (bypasses time-based color logic) */
+  strokeColor?: string;
+  /** Hide the seconds text display (ring still shows) */
+  hideText?: boolean;
 }
 
 const SIZE = 52;
@@ -28,6 +32,8 @@ export default function CountdownTimer({
   frozenTime = null,
   duration = 2000,
   resumeFrom = null,
+  strokeColor,
+  hideText = false,
 }: CountdownTimerProps) {
   const [elapsed, setElapsed] = useState(0);
   const startRef = useRef(0);
@@ -88,9 +94,10 @@ export default function CountdownTimer({
 
   const progress = Math.min(elapsed / duration, 1);
   const dashOffset = CIRCUMFERENCE * progress;
-  const color = getColor(elapsed, duration);
+  const color = strokeColor ?? getColor(elapsed, duration);
 
-  const showTime = frozenTime != null;
+  // Only show time text when frozen at an actual elapsed time (not 0)
+  const showTime = frozenTime != null && frozenTime > 0 && !hideText;
   const timeText = showTime ? `${(frozenTime / 1000).toFixed(1)}s` : '';
 
   return (

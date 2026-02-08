@@ -4,109 +4,77 @@ beforeEach(() => {
   useStore.getState().resetProgress();
 });
 
-describe('Zustand store', () => {
-  test('initial state', () => {
+describe('Store', () => {
+  it('starts with deck progress unlockedCount 1', () => {
     const state = useStore.getState();
-    expect(state.currentStage).toBe(1);
-    expect(state.completedStages).toEqual([]);
-    expect(state.stats.totalReps).toBe(0);
+    expect(state.deckProgress.unlockedCount).toBe(1);
   });
 
-  test('completeStage advances currentStage', () => {
-    useStore.getState().completeStage(1);
-    const state = useStore.getState();
-    expect(state.completedStages).toContain(1);
-    expect(state.currentStage).toBe(2);
+  it('saveDeckProgress updates unlocked count', () => {
+    useStore.getState().saveDeckProgress(5);
+    expect(useStore.getState().deckProgress.unlockedCount).toBe(5);
   });
 
-  test('completeStage is idempotent', () => {
-    useStore.getState().completeStage(1);
-    useStore.getState().completeStage(1);
-    expect(useStore.getState().completedStages.filter((s) => s === 1)).toHaveLength(1);
-  });
-
-  test('completeStage does not exceed 11', () => {
-    useStore.getState().completeStage(11);
-    expect(useStore.getState().currentStage).toBe(11);
-  });
-
-  test('saveTrialResult stores best time', () => {
-    useStore.getState().saveTrialResult(1, {
-      trialId: 'test-1',
+  it('saveTrialResult stores best time', () => {
+    useStore.getState().saveTrialResult('all', {
+      trialId: 'test',
       time: 5000,
       mistakes: 2,
-      headingsPerMinute: 72,
+      headingsPerMinute: 30,
     });
-    const best = useStore.getState().trialBestTimes['1'];
-    expect(best).toBeDefined();
-    expect(best.time).toBe(5000);
+    expect(useStore.getState().trialBestTimes['all'].time).toBe(5000);
   });
 
-  test('saveTrialResult keeps better time', () => {
-    useStore.getState().saveTrialResult(1, {
-      trialId: 'test-1',
+  it('saveTrialResult keeps better time', () => {
+    useStore.getState().saveTrialResult('all', {
+      trialId: 'test1',
       time: 5000,
       mistakes: 2,
-      headingsPerMinute: 72,
+      headingsPerMinute: 30,
     });
-    useStore.getState().saveTrialResult(1, {
-      trialId: 'test-2',
+    useStore.getState().saveTrialResult('all', {
+      trialId: 'test2',
       time: 3000,
-      mistakes: 0,
-      headingsPerMinute: 120,
-    });
-    expect(useStore.getState().trialBestTimes['1'].time).toBe(3000);
-  });
-
-  test('saveTrialResult does not overwrite with worse time', () => {
-    useStore.getState().saveTrialResult(1, {
-      trialId: 'test-1',
-      time: 3000,
-      mistakes: 0,
-      headingsPerMinute: 120,
-    });
-    useStore.getState().saveTrialResult(1, {
-      trialId: 'test-2',
-      time: 5000,
-      mistakes: 2,
-      headingsPerMinute: 72,
-    });
-    expect(useStore.getState().trialBestTimes['1'].time).toBe(3000);
-  });
-
-  test('export and import round-trip', () => {
-    useStore.getState().completeStage(1);
-    useStore.getState().completeStage(2);
-    useStore.getState().saveTrialResult(1, {
-      trialId: 'test-1',
-      time: 5000,
       mistakes: 1,
-      headingsPerMinute: 72,
+      headingsPerMinute: 40,
     });
+    expect(useStore.getState().trialBestTimes['all'].time).toBe(3000);
+  });
 
+  it('saveTrialResult does not overwrite with worse time', () => {
+    useStore.getState().saveTrialResult('all', {
+      trialId: 'test1',
+      time: 3000,
+      mistakes: 1,
+      headingsPerMinute: 40,
+    });
+    useStore.getState().saveTrialResult('all', {
+      trialId: 'test2',
+      time: 5000,
+      mistakes: 2,
+      headingsPerMinute: 30,
+    });
+    expect(useStore.getState().trialBestTimes['all'].time).toBe(3000);
+  });
+
+  it('resetProgress resets everything', () => {
+    useStore.getState().saveDeckProgress(10);
+    useStore.getState().resetProgress();
+    expect(useStore.getState().deckProgress.unlockedCount).toBe(1);
+    expect(Object.keys(useStore.getState().trialBestTimes).length).toBe(0);
+  });
+
+  it('export and import roundtrip', () => {
+    useStore.getState().saveDeckProgress(15);
     const exported = useStore.getState().exportState();
     useStore.getState().resetProgress();
-    expect(useStore.getState().completedStages).toEqual([]);
-
     const success = useStore.getState().importState(exported);
     expect(success).toBe(true);
-    expect(useStore.getState().completedStages).toContain(1);
-    expect(useStore.getState().completedStages).toContain(2);
-    expect(useStore.getState().trialBestTimes['1'].time).toBe(5000);
+    expect(useStore.getState().deckProgress.unlockedCount).toBe(15);
   });
 
-  test('import rejects invalid data', () => {
-    expect(useStore.getState().importState('not-base64!')).toBe(false);
-    expect(useStore.getState().importState(btoa('{}'))).toBe(false);
-  });
-
-  test('resetProgress clears everything', () => {
-    useStore.getState().completeStage(1);
-    useStore.getState().resetProgress();
-
-    const state = useStore.getState();
-    expect(state.currentStage).toBe(1);
-    expect(state.completedStages).toEqual([]);
-    expect(state.stats.totalReps).toBe(0);
+  it('importState rejects invalid data', () => {
+    const success = useStore.getState().importState('not-valid-base64!!!');
+    expect(success).toBe(false);
   });
 });

@@ -1,201 +1,163 @@
 import {
-  LearningEngine,
+  DeckEngine,
   TrialEngine,
+  MasteryChallengeEngine,
   gradeResponse,
-  SETS,
-  STAGES,
-  getStageHeadings,
-  getStageName,
+  MASTER_SEQUENCE,
 } from '../../src/core/algorithms/trainingEngine';
 
-describe('SETS and STAGES constants', () => {
-  test('SETS contains 6 sets of 6 headings each', () => {
-    expect(SETS).toHaveLength(6);
-    for (const set of SETS) {
-      expect(set).toHaveLength(6);
-    }
+describe('DeckEngine', () => {
+  it('starts with one heading (36)', () => {
+    const engine = new DeckEngine();
+    expect(engine.getDeckSize()).toBe(1);
+    expect(engine.drawNext()).toBe('36');
   });
 
-  test('all 36 headings are covered across SETS', () => {
-    const all = SETS.flat().sort();
-    const expected = Array.from({ length: 36 }, (_, i) =>
-      String(i + 1).padStart(2, '0')
-    ).sort();
-    expect(all).toEqual(expected);
+  it('fast answer (<1.0s) grants mastery', () => {
+    const engine = new DeckEngine();
+    engine.drawNext();
+    const result = engine.recordResult('36', 500, true);
+    expect(result.feedbackColor).toBe('green');
+    expect(result.isMastered).toBe(true);
+    expect(result.allMastered).toBe(true);
   });
 
-  test('STAGES has 11 entries', () => {
-    expect(STAGES).toHaveLength(11);
+  it('slow answer does not grant mastery', () => {
+    const engine = new DeckEngine();
+    engine.drawNext();
+    const result = engine.recordResult('36', 1200, true);
+    expect(result.feedbackColor).toBe('amber');
+    expect(result.isMastered).toBe(false);
   });
 
-  test('Stage 11 includes all sets', () => {
-    expect(STAGES[10]).toEqual([0, 1, 2, 3, 4, 5]);
-  });
-});
-
-describe('LearningEngine', () => {
-  test('constructor builds queue from stage headings', () => {
-    const engine = new LearningEngine(1);
-    expect(engine.getQueueLength()).toBe(6);
-    expect(engine.totalHeadings).toBe(6);
-  });
-
-  test('drawNext returns front of queue and increments seenCount', () => {
-    const engine = new LearningEngine(1);
-    const h = engine.drawNext();
-    expect(typeof h).toBe('string');
-    expect(engine.getSeenCount()[h]).toBe(1);
-  });
-
-  test('recordResult with fast adds to mastered and reinserts', () => {
-    const engine = new LearningEngine(1);
-    const h = engine.drawNext();
-    engine.recordResult(h, 'fast');
-    expect(engine.getQueueLength()).toBe(6);
+  it('wrong answer removes mastery', () => {
+    const engine = new DeckEngine();
+    engine.drawNext();
+    engine.recordResult('36', 500, true);
     expect(engine.getMasteredCount()).toBe(1);
-    expect(engine.getMasteredHeadings()).toContain(h);
+    engine.drawNext();
+    engine.recordResult('36', 500, false);
+    expect(engine.getMasteredCount()).toBe(0);
   });
 
-  test('recordResult with wrong removes from mastered and tracks mistakes', () => {
-    const engine = new LearningEngine(1);
-
-    let h = engine.drawNext();
-    engine.recordResult(h, 'fast');
-    expect(engine.getMasteredCount()).toBe(1);
-
-    // Force the same heading to appear by drawing until we find it
-    // Instead, just record a wrong on a new heading
-    const h2 = engine.drawNext();
-    engine.recordResult(h2, 'wrong');
-    expect(engine.getTotalMistakes()).toBe(1);
-    expect(engine.getMistakesByHeading()[h2]).toBe(1);
+  it('auto-unlocks next heading when all mastered', () => {
+    const engine = new DeckEngine();
+    engine.drawNext();
+    const r = engine.recordResult('36', 500, true);
+    expect(r.allMastered).toBe(true);
+    expect(r.newHeadingUnlocked).toBe(true);
+    expect(engine.getDeckSize()).toBe(2);
   });
 
-  test('recordResult with slow does not affect mastery', () => {
-    const engine = new LearningEngine(1);
-    const h = engine.drawNext();
-    engine.recordResult(h, 'fast');
-    expect(engine.getMasteredCount()).toBe(1);
-
-    const h2 = engine.drawNext();
-    engine.recordResult(h2, 'slow');
-    // slow doesn't add to mastered, but doesn't remove existing mastered
-    expect(engine.getMasteredCount()).toBe(1);
+  it('penalty box: wrong goes to position 0', () => {
+    const engine = new DeckEngine();
+    engine.drawNext();
+    engine.recordResult('36', 500, false);
+    expect(engine.isInPenaltyBox('36')).toBe(true);
+    expect(engine.drawNext()).toBe('36');
   });
 
-  test('isStageComplete when all headings mastered', () => {
-    const engine = new LearningEngine(1);
-    expect(engine.isStageComplete()).toBe(false);
-
-    // Answer fast enough times that all 6 headings get mastered
-    for (let i = 0; i < 50; i++) {
-      if (engine.isStageComplete()) break;
-      const h = engine.drawNext();
-      engine.recordResult(h, 'fast');
-    }
-
-    expect(engine.isStageComplete()).toBe(true);
-    expect(engine.getMasteredCount()).toBe(6);
+  it('penalty box: escape requires correct <1.0s', () => {
+    const engine = new DeckEngine();
+    engine.drawNext();
+    engine.recordResult('36', 500, false); // into penalty
+    engine.drawNext();
+    engine.recordResult('36', 500, true); // correct <1s → escape
+    expect(engine.isInPenaltyBox('36')).toBe(false);
   });
 
-  test('stage with more headings works', () => {
-    const engine = new LearningEngine(3); // Sets 1+2 = 12 headings
-    expect(engine.getQueueLength()).toBe(12);
-    expect(engine.totalHeadings).toBe(12);
+  it('addNextHeading grows the deck', () => {
+    const engine = new DeckEngine();
+    engine.addNextHeading();
+    expect(engine.getDeckSize()).toBe(2);
   });
 
-  test('invalid stage throws', () => {
-    expect(() => new LearningEngine(0)).toThrow();
-    expect(() => new LearningEngine(12)).toThrow();
+  it('getHeadingReport returns stats', () => {
+    const engine = new DeckEngine();
+    engine.drawNext();
+    engine.recordResult('36', 500, true);
+    const report = engine.getHeadingReport();
+    expect(report[0].heading).toBe('36');
+    expect(report[0].mastered).toBe(true);
   });
 });
 
 describe('TrialEngine', () => {
-  const testHeadings = ['01', '02', '03', '04', '05', '06'];
-
-  test('constructor shuffles and sets queue', () => {
-    const engine = new TrialEngine(testHeadings);
-    expect(engine.getRemaining()).toBe(6);
+  it('removes on fast, reinserts on wrong', () => {
+    const engine = new TrialEngine(['36', '18']);
+    engine.drawNext();
+    engine.recordResult('36', 'fast');
+    expect(engine.getRemaining()).toBe(1);
   });
 
-  test('fast grade removes heading permanently', () => {
-    const engine = new TrialEngine(testHeadings);
-    const h = engine.drawNext();
-    engine.recordResult(h, 'fast');
-    expect(engine.getRemaining()).toBe(5);
-  });
-
-  test('slow grade reinserts heading', () => {
-    const engine = new TrialEngine(testHeadings);
-    const h = engine.drawNext();
-    engine.recordResult(h, 'slow');
-    expect(engine.getRemaining()).toBe(6); // Still 6, reinserted
-    expect(engine.getMistakes()).toBe(1);
-  });
-
-  test('wrong grade reinserts heading', () => {
-    const engine = new TrialEngine(testHeadings);
-    const h = engine.drawNext();
-    engine.recordResult(h, 'wrong');
-    expect(engine.getRemaining()).toBe(6);
-    expect(engine.getMistakes()).toBe(1);
-  });
-
-  test('trial completes when all eliminated', () => {
-    const engine = new TrialEngine(testHeadings);
-    // Keep answering fast until done
-    let safety = 0;
-    while (!engine.isTrialComplete() && safety < 100) {
-      const h = engine.drawNext();
-      engine.recordResult(h, 'fast');
-      safety++;
-    }
+  it('completes when empty', () => {
+    const engine = new TrialEngine(['36']);
+    engine.drawNext();
+    engine.recordResult('36', 'fast');
     expect(engine.isTrialComplete()).toBe(true);
-    expect(engine.getRemaining()).toBe(0);
+  });
+});
+
+describe('MasteryChallengeEngine', () => {
+  it('starts with 36 headings', () => {
+    const engine = new MasteryChallengeEngine();
+    expect(engine.getRemaining()).toBe(36);
+  });
+
+  it('removes heading on correct <1.0s', () => {
+    const engine = new MasteryChallengeEngine();
+    const h = engine.drawNext();
+    const result = engine.recordResult(h, 500, true);
+    expect(result.feedbackColor).toBe('green');
+    expect(result.removed).toBe(true);
+    expect(engine.getRemaining()).toBe(35);
+  });
+
+  it('requeues on slow correct', () => {
+    const engine = new MasteryChallengeEngine();
+    const h = engine.drawNext();
+    const result = engine.recordResult(h, 1500, true);
+    expect(result.feedbackColor).toBe('red');
+    expect(result.removed).toBe(false);
+    expect(engine.getRemaining()).toBe(36);
+  });
+
+  it('requeues on wrong', () => {
+    const engine = new MasteryChallengeEngine();
+    const h = engine.drawNext();
+    const result = engine.recordResult(h, 500, false);
+    expect(result.feedbackColor).toBe('red');
+    expect(engine.getRemaining()).toBe(36);
+  });
+
+  it('tracks first-time accuracy', () => {
+    const engine = new MasteryChallengeEngine();
+    const h = engine.drawNext();
+    engine.recordResult(h, 500, true); // first attempt correct+fast
+    expect(engine.getFirstTimeCorrectCount()).toBe(1);
+  });
+
+  it('score = time / accuracy', () => {
+    const engine = new MasteryChallengeEngine();
+    // Simulate 1 correct first attempt out of 36
+    const h = engine.drawNext();
+    engine.recordResult(h, 500, true);
+    const accuracy = 1 / 36;
+    const score = engine.getScore(60000);
+    expect(score).toBeCloseTo(60000 / accuracy, 0);
   });
 });
 
 describe('gradeResponse', () => {
-  const LIMIT = 2000;
-
-  test('correct + under 1s = fast', () => {
-    expect(gradeResponse(true, 500, LIMIT)).toBe('fast');
-    expect(gradeResponse(true, 999, LIMIT)).toBe('fast');
-  });
-
-  test('correct + 1s to limit = slow', () => {
-    expect(gradeResponse(true, 1000, LIMIT)).toBe('slow');
-    expect(gradeResponse(true, 1500, LIMIT)).toBe('slow');
-    expect(gradeResponse(true, 1999, LIMIT)).toBe('slow');
-  });
-
-  test('correct + at/over limit = wrong', () => {
-    expect(gradeResponse(true, 2000, LIMIT)).toBe('wrong');
-    expect(gradeResponse(true, 3000, LIMIT)).toBe('wrong');
-  });
-
-  test('incorrect = wrong regardless of time', () => {
-    expect(gradeResponse(false, 100, LIMIT)).toBe('wrong');
-    expect(gradeResponse(false, 500, LIMIT)).toBe('wrong');
-  });
+  it('fast < 1000ms', () => expect(gradeResponse(true, 500, 2000)).toBe('fast'));
+  it('slow 1000-2000ms', () => expect(gradeResponse(true, 1500, 2000)).toBe('slow'));
+  it('wrong on incorrect', () => expect(gradeResponse(false, 500, 2000)).toBe('wrong'));
+  it('wrong on timeout', () => expect(gradeResponse(true, 2000, 2000)).toBe('wrong'));
 });
 
-describe('getStageHeadings', () => {
-  test('stage 1 returns set 1 headings', () => {
-    const headings = getStageHeadings(1);
-    expect(headings).toEqual(SETS[0]);
-  });
-
-  test('stage 11 returns all 36 headings', () => {
-    const headings = getStageHeadings(11);
-    expect(headings).toHaveLength(36);
-  });
-});
-
-describe('getStageName', () => {
-  test('returns formatted stage name', () => {
-    expect(getStageName(1)).toBe('Stage 1 — Set 1');
-    expect(getStageName(3)).toBe('Stage 3 — Set 1+Set 2');
-    expect(getStageName(11)).toContain('Stage 11');
+describe('MASTER_SEQUENCE', () => {
+  it('has 36 unique headings', () => {
+    expect(MASTER_SEQUENCE.length).toBe(36);
+    expect(new Set(MASTER_SEQUENCE).size).toBe(36);
   });
 });
