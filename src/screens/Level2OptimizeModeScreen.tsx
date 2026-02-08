@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
+import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useNavigation, usePreventRemove } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -6,35 +6,75 @@ import { RootStackParamList } from '../navigation/AppNavigator';
 import Numpad from '../features/numpad/Numpad';
 import HeadingDisplay from '../features/stimulus/HeadingDisplay';
 import CountdownTimer from '../ui/CountdownTimer';
-import { DeckEngine, MASTER_SEQUENCE, GRID_PAIRS } from '../core/algorithms/trainingEngine';
+import { MASTER_SEQUENCE, GRID_PAIRS } from '../core/algorithms/trainingEngine';
+import { FocusDeckEngine } from '../core/algorithms/focusDeckEngine';
 import { SessionManager } from '../state/sessionManager';
-import { useStore } from '../state/store';
+import { useStore, HeadingPerformance, MasteryHeadingResult } from '../state/store';
 import { FeedbackState, TIMING } from '../core/types';
 import { calculateReciprocal } from '../core/algorithms/reciprocal';
 
-type SessionPhase = 'dashboard' | 'countdown' | 'active' | 'paused';
+type SessionPhase = 'dashboard' | 'countdown' | 'active' | 'paused' | 'complete';
 
 const FEEDBACK_HOLD_MS = 1200;
 
-function ProgressGrid({ engine }: { engine: DeckEngine }) {
+function formatDate(timestamp: number | null): string {
+  if (!timestamp) return '';
+  const d = new Date(timestamp);
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  const yy = String(d.getFullYear()).slice(-2);
+  return `${mm}-${dd}-${yy}`;
+}
+
+function buildWeightedSequence(
+  practiceData: Record<string, HeadingPerformance>,
+  masteryResults: Record<string, MasteryHeadingResult>,
+): string[] {
+  const scored = MASTER_SEQUENCE.map((h) => {
+    const pd = practiceData[h];
+    const mr = masteryResults[h];
+    let score = 5000;
+    if (pd) {
+      score = pd.avgTime + pd.mistakes * 500;
+    } else if (mr) {
+      score = mr.status === 'red' ? 8000 : mr.status === 'amber' ? 5000 : 500;
+    }
+    return { heading: h, score };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  return scored.map((s) => s.heading);
+}
+
+function ProgressGrid({ engine, practiceData: pd }: { engine: FocusDeckEngine; practiceData: Record<string, HeadingPerformance> }) {
   const mastered = engine.getMasteredHeadings();
-  const deck = engine.getDeckSet();
 
   const renderCell = (h: string) => {
     const isMastered = mastered.has(h);
-    const inDeck = deck.has(h);
-    const cellColor = isMastered ? '#00e676' : inDeck ? '#ffab00' : '#334455';
-    const textColor = isMastered ? '#00e676' : inDeck ? '#ffab00' : '#556677';
+    const perf = pd[h];
+    let cellColor: string;
+    let bgColor = 'transparent';
+    if (isMastered) {
+      cellColor = '#00e676';
+      bgColor = 'rgba(0,230,118,0.12)';
+    } else if (perf) {
+      cellColor = perf.status === 'green' ? '#00e676' : perf.status === 'amber' ? '#ffab00' : '#ff5555';
+      if (perf.status === 'green') bgColor = 'rgba(0,230,118,0.12)';
+      else if (perf.status === 'amber') bgColor = 'rgba(255,171,0,0.08)';
+      else bgColor = 'rgba(255,85,85,0.08)';
+    } else {
+      cellColor = '#334455';
+    }
 
     return (
       <View
         key={h}
         style={[
           styles.gridCell,
-          { borderColor: cellColor, backgroundColor: isMastered ? 'rgba(0,230,118,0.12)' : 'transparent' },
+          { borderColor: cellColor, backgroundColor: bgColor },
         ]}
       >
-        <Text style={[styles.gridCellText, { color: textColor }]}>{h}</Text>
+        <Text style={[styles.gridCellText, { color: cellColor }]}>{h}</Text>
       </View>
     );
   };
@@ -51,14 +91,23 @@ function ProgressGrid({ engine }: { engine: DeckEngine }) {
   );
 }
 
-export default function Level2ModeScreen() {
+export default function Level2OptimizeModeScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const saveDeckProgress = useStore((s) => s.saveLevel2DeckProgress);
-  const savedProgress = useStore((s) => s.level2DeckProgress);
-  const storedTotalReps = useStore((s) => s.level2DeckProgress.totalReps || 0);
+  const practiceData = useStore((s) => s.level2PracticeData);
+  const masteryResults = useStore((s) => s.level2MasteryResults);
+  const practiceDataUpdatedAt = useStore((s) => s.level2PracticeDataUpdatedAt);
+  const batchUpdatePracticeData = useStore((s) => s.batchUpdateLevel2PracticeData);
+  const resetPracticeData = useStore((s) => s.resetLevel2PracticeData);
 
-  const engineRef = useRef<DeckEngine>(new DeckEngine());
+  const weightedSequence = useMemo(
+    () => buildWeightedSequence(practiceData, masteryResults),
+    [practiceData, masteryResults],
+  );
+
+  const engineRef = useRef<FocusDeckEngine>(FocusDeckEngine.restoreAllUnlocked(weightedSequence));
   const sessionRef = useRef<SessionManager>(new SessionManager(engineRef.current));
+  const sessionDataRef = useRef<{ heading: string; time: number; isCorrect: boolean }[]>([]);
+
   const [phase, setPhase] = useState<SessionPhase>('dashboard');
   const phaseRef = useRef<SessionPhase>('dashboard');
   const [heading, setHeading] = useState('');
@@ -74,8 +123,6 @@ export default function Level2ModeScreen() {
   const [showCorrect, setShowCorrect] = useState<string | undefined>(undefined);
 
   const [masteredCount, setMasteredCount] = useState(0);
-  const [deckSize, setDeckSize] = useState(1);
-  const [unlockedCount, setUnlockedCount] = useState(1);
   const [totalReps, setTotalReps] = useState(0);
   const [gridKey, setGridKey] = useState(0);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
@@ -86,63 +133,35 @@ export default function Level2ModeScreen() {
     }
   }, [repKey]);
 
-  const saveProgress = useCallback((eng: DeckEngine, incrementReps = false) => {
-    saveDeckProgress(
-      eng.getUnlockedCount(),
-      [...eng.getMasteredHeadings()],
-      incrementReps,
-      [...eng.getEverMasteredHeadings()],
-    );
-  }, [saveDeckProgress]);
+  const saveSessionData = useCallback(() => {
+    if (sessionDataRef.current.length > 0) {
+      const mastered = Array.from(engineRef.current.getMasteredHeadings());
+      batchUpdatePracticeData(sessionDataRef.current, mastered);
+      sessionDataRef.current = [];
+    }
+  }, [batchUpdatePracticeData]);
 
   const updateStats = useCallback(() => {
     const engine = engineRef.current;
     setMasteredCount(engine.getMasteredCount());
-    setDeckSize(engine.getDeckSize());
-    setUnlockedCount(engine.getUnlockedCount());
     setTotalReps((r) => r + 1);
     setGridKey((k) => k + 1);
-    saveProgress(engine, true);
-  }, [saveProgress]);
-
-  const resetSession = useCallback(() => {
-    saveDeckProgress(1, [], false, []);
-    engineRef.current = new DeckEngine();
-    sessionRef.current = new SessionManager(engineRef.current);
-    setPhase('dashboard');
-    phaseRef.current = 'dashboard';
-    setDisabled(false);
-    setInput('');
-    setTimerRunning(false);
-    setFrozenTime(null);
-    setMasteredCount(0);
-    setDeckSize(1);
-    setUnlockedCount(1);
-    setTotalReps(0);
-    setGridKey(0);
-  }, [saveDeckProgress]);
+  }, []);
 
   const startSession = useCallback(() => {
-    const saved = savedProgress.unlockedCount;
-    const masteredHeadings = savedProgress.masteredHeadings || [];
-    const everMasteredHeadings = savedProgress.everMasteredHeadings || masteredHeadings;
-    if (saved > 1 || masteredHeadings.length > 0) {
-      engineRef.current = DeckEngine.restore(saved, masteredHeadings, everMasteredHeadings);
-    } else {
-      engineRef.current = new DeckEngine();
-    }
+    engineRef.current = FocusDeckEngine.restoreAllUnlocked(weightedSequence);
     sessionRef.current = new SessionManager(engineRef.current);
+    sessionDataRef.current = [];
     setPhase('countdown');
     phaseRef.current = 'countdown';
     setDisabled(false);
     setInput('');
     setFeedbackColor(undefined);
+    setShowCorrect(undefined);
     setShowHeading(false);
     setTimerRunning(false);
     setFrozenTime(null);
-    setMasteredCount(engineRef.current.getMasteredCount());
-    setDeckSize(engineRef.current.getDeckSize());
-    setUnlockedCount(engineRef.current.getUnlockedCount());
+    setMasteredCount(0);
     setTotalReps(0);
     setGridKey((k) => k + 1);
 
@@ -159,7 +178,20 @@ export default function Level2ModeScreen() {
       setFrozenTime(null);
       setResumeFrom(null);
     }, 1000);
-  }, [savedProgress]);
+  }, [weightedSequence]);
+
+  const stopSession = useCallback(() => {
+    setPhase('complete');
+    phaseRef.current = 'complete';
+    setDisabled(false);
+    setTimerRunning(false);
+    setFrozenTime(null);
+    saveSessionData();
+  }, [saveSessionData]);
+
+  usePreventRemove(phase !== 'dashboard' && phase !== 'complete', () => {
+    stopSession();
+  });
 
   const pauseSession = useCallback(() => {
     const sinceLast = sessionRef.current.getTimeElapsed();
@@ -180,21 +212,6 @@ export default function Level2ModeScreen() {
     setFrozenTime(null);
   }, [frozenTime]);
 
-  const stopSession = useCallback(() => {
-    setPhase('dashboard');
-    phaseRef.current = 'dashboard';
-    setInput('');
-    setDisabled(false);
-    setTimerRunning(false);
-    setFrozenTime(null);
-    saveProgress(engineRef.current);
-  }, [saveProgress]);
-
-  // Intercept back: active → dashboard, dashboard → pop
-  usePreventRemove(phase !== 'dashboard', () => {
-    stopSession();
-  });
-
   const clearFeedbackAndAdvance = useCallback(() => {
     if (phaseRef.current !== 'active') return;
 
@@ -205,9 +222,9 @@ export default function Level2ModeScreen() {
 
     const engine = engineRef.current;
     if (engine.isComplete()) {
-      saveProgress(engine);
-      setPhase('dashboard');
-      phaseRef.current = 'dashboard';
+      saveSessionData();
+      setPhase('complete');
+      phaseRef.current = 'complete';
       return;
     }
 
@@ -227,26 +244,21 @@ export default function Level2ModeScreen() {
       setFrozenTime(null);
       setResumeFrom(null);
     }, TIMING.INTER_REP_DELAY);
-  }, [saveProgress]);
+  }, [saveSessionData]);
 
   const processAnswer = useCallback((userInput: string, timeMs: number) => {
     const expected = calculateReciprocal(heading);
     const isCorrect = userInput === expected;
 
-    // Adjust time for Level 2 thresholds (subtract offset so engine thresholds work correctly)
-    // Level 2 has +500ms for numpad lookup, so 1500ms in L2 = 1000ms equivalent for grading
     const adjustedTime = Math.max(0, timeMs - TIMING.LEVEL2_OFFSET);
     const engine = engineRef.current;
     const engineResult = engine.recordResult(heading, adjustedTime, isCorrect);
 
+    sessionDataRef.current.push({ heading, time: adjustedTime, isCorrect });
+
     setFeedbackColor(engineResult.feedbackColor);
     updateStats();
 
-    if (engineResult.newHeadingUnlocked) {
-      saveProgress(engineRef.current);
-    }
-
-    // Show correct answer in numpad display for wrong answers
     if (!isCorrect) {
       setShowCorrect(expected);
     }
@@ -255,7 +267,7 @@ export default function Level2ModeScreen() {
       setShowCorrect(undefined);
       clearFeedbackAndAdvance();
     }, FEEDBACK_HOLD_MS);
-  }, [heading, updateStats, clearFeedbackAndAdvance, saveProgress]);
+  }, [heading, updateStats, clearFeedbackAndAdvance]);
 
   const handleTimeout = useCallback(() => {
     if (disabled || phase !== 'active') return;
@@ -264,10 +276,10 @@ export default function Level2ModeScreen() {
     setFrozenTime(TIMING.LEVEL2_LIMIT);
 
     const expected = calculateReciprocal(heading);
-
-    // Record as wrong with timeout (use L1 limit since that's the adjusted threshold)
     const engine = engineRef.current;
     engine.recordResult(heading, TIMING.LEVEL1_LIMIT, false);
+
+    sessionDataRef.current.push({ heading, time: TIMING.LEVEL1_LIMIT, isCorrect: false });
 
     setFeedbackColor('red');
     setShowCorrect(expected);
@@ -279,7 +291,6 @@ export default function Level2ModeScreen() {
     }, FEEDBACK_HOLD_MS);
   }, [disabled, heading, phase, updateStats, clearFeedbackAndAdvance]);
 
-  // Auto-submit when 2 digits entered
   useEffect(() => {
     if (input.length === 2 && !disabled && phase === 'active') {
       setDisabled(true);
@@ -309,59 +320,39 @@ export default function Level2ModeScreen() {
     setInput((prev) => prev.slice(0, -1));
   }, [disabled, phase]);
 
+  // Dashboard view
   if (phase === 'dashboard') {
-    const saved = savedProgress.unlockedCount;
-    const masteredHeadings = savedProgress.masteredHeadings || [];
-    const everMasteredHeadings = savedProgress.everMasteredHeadings || masteredHeadings;
-    const dashEngine = (saved > 1 || masteredHeadings.length > 0)
-      ? DeckEngine.restore(saved, masteredHeadings, everMasteredHeadings)
-      : new DeckEngine();
-    const dashMastered = dashEngine.getMasteredHeadings();
-    const dashDeck = dashEngine.getDeckSet();
-    const dashReport = dashEngine.getHeadingReport();
-    const allComplete = dashEngine.isComplete();
-    const hasPriorSession = totalReps > 0;
-
-    const reportMap: Record<string, { reps: number }> = {};
-    for (const item of dashReport) {
-      reportMap[item.heading] = { reps: item.reps };
-    }
-
     const gridRows: string[][] = [];
     for (let i = 0; i < MASTER_SEQUENCE.length; i += 6) {
       gridRows.push(MASTER_SEQUENCE.slice(i, i + 6));
     }
 
-    const startLabel = allComplete ? 'Train Again' : hasPriorSession ? 'Resume' : 'Start Training';
-
     return (
-      <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.scrollContent}>
-        <Text style={styles.title}>Level 2 Mode</Text>
-        <Text style={styles.subtitle}>Type the Reciprocal</Text>
-        <Text style={styles.statsLine}>
-          Mastered: {dashEngine.getMasteredCount()}/36
+      <View style={styles.container}>
+        <Text style={styles.title}>Optimize Mode</Text>
+        <Text style={styles.subtitle}>
+          Based on Practice Data{practiceDataUpdatedAt ? ` • Updated ${formatDate(practiceDataUpdatedAt)}` : ''}
         </Text>
-        <Text style={styles.statsDetail}>
-          {storedTotalReps} reps since last reset
-        </Text>
-        {hasPriorSession && (
-          <Text style={styles.statsDetail}>
-            {totalReps} reps this session
-          </Text>
-        )}
 
-        <View style={styles.endGrid}>
+        <View style={styles.dashboardGrid}>
           {gridRows.map((row, ri) => (
-            <View key={ri} style={styles.endGridRow}>
+            <View key={ri} style={styles.dashboardGridRow}>
               {row.map((h, ci) => {
-                const isMastered = dashMastered.has(h);
-                const inDeck = dashDeck.has(h);
-                const color = isMastered ? '#00e676' : inDeck ? '#ffab00' : '#556677';
-                const reps = reportMap[h]?.reps || 0;
+                const pd = practiceData[h];
+                const color = pd
+                  ? pd.status === 'green' ? '#00e676' : pd.status === 'amber' ? '#ffab00' : '#ff5555'
+                  : '#556677';
+                const bgColor = pd?.status === 'green' ? 'rgba(0,230,118,0.12)' : pd?.status === 'amber' ? 'rgba(255,171,0,0.08)' : 'transparent';
                 return (
-                  <View key={h} style={[styles.endGridCell, { borderColor: color, backgroundColor: isMastered ? 'rgba(0,230,118,0.12)' : 'transparent' }, (ci === 2 || ci === 4) && { marginLeft: 16 }]}>
-                    <Text style={[styles.endGridHeading, { color }]}>{h}</Text>
-                    <Text style={styles.endGridReps}>{reps > 0 ? reps : '—'}</Text>
+                  <View
+                    key={h}
+                    style={[
+                      styles.dashboardGridCell,
+                      { borderColor: color, backgroundColor: bgColor },
+                      (ci === 2 || ci === 4) && { marginLeft: 16 },
+                    ]}
+                  >
+                    <Text style={[styles.dashboardGridText, { color }]}>{h}</Text>
                   </View>
                 );
               })}
@@ -370,7 +361,7 @@ export default function Level2ModeScreen() {
         </View>
 
         <Pressable style={styles.primaryBtn} onPress={startSession}>
-          <Text style={styles.primaryBtnText}>{startLabel}</Text>
+          <Text style={styles.primaryBtnText}>Start Optimizing</Text>
         </Pressable>
 
         <Pressable style={styles.secondaryBtn} onPress={() => navigation.navigate('Practice2Home')}>
@@ -378,36 +369,61 @@ export default function Level2ModeScreen() {
         </Pressable>
 
         <Pressable style={styles.resetBtn} onPress={() => setShowResetConfirm(true)}>
-          <Text style={styles.resetBtnText}>Reset</Text>
+          <Text style={styles.resetBtnText}>Reset Practice Data</Text>
         </Pressable>
 
         {showResetConfirm && (
           <View style={styles.confirmOverlay}>
             <View style={styles.confirmCard}>
-              <Text style={styles.confirmTitle}>Reset Progress?</Text>
-              <Text style={styles.confirmMessage}>Are you sure you want to reset all your progress?</Text>
+              <Text style={styles.confirmTitle}>Reset Practice Data?</Text>
+              <Text style={styles.confirmMessage}>This will lock Optimize until you complete a Mastery Challenge.</Text>
               <View style={styles.confirmBtnRow}>
                 <Pressable style={styles.confirmBtnNo} onPress={() => setShowResetConfirm(false)}>
                   <Text style={styles.confirmBtnNoText}>Cancel</Text>
                 </Pressable>
-                <Pressable style={styles.confirmBtnYes} onPress={() => { setShowResetConfirm(false); resetSession(); }}>
+                <Pressable style={styles.confirmBtnYes} onPress={() => { setShowResetConfirm(false); resetPracticeData(); navigation.navigate('Practice2Home'); }}>
                   <Text style={styles.confirmBtnYesText}>Reset</Text>
                 </Pressable>
               </View>
             </View>
           </View>
         )}
-      </ScrollView>
+      </View>
     );
   }
 
+  // Complete view
+  if (phase === 'complete') {
+    const engine = engineRef.current;
+    const allComplete = engine.isComplete();
+    return (
+      <View style={styles.container}>
+        <Text style={styles.title}>
+          {allComplete ? 'All Mastered!' : 'Session Ended'}
+        </Text>
+        <Text style={styles.statsLine}>
+          Mastered: {engine.getMasteredCount()}/36
+        </Text>
+        <Text style={styles.statsDetail}>{totalReps} reps this session</Text>
+
+        <Pressable style={styles.primaryBtn} onPress={startSession}>
+          <Text style={styles.primaryBtnText}>Try Again</Text>
+        </Pressable>
+        <Pressable style={styles.secondaryBtn} onPress={() => { setPhase('dashboard'); phaseRef.current = 'dashboard'; }}>
+          <Text style={styles.secondaryBtnText}>Done</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  // Active / Countdown / Paused
   const isCountdown = phase === 'countdown';
   const isPaused = phase === 'paused';
 
   return (
     <View style={styles.activeContainer}>
       <View style={styles.gridPositioner}>
-        <ProgressGrid key={gridKey} engine={engineRef.current} />
+        <ProgressGrid key={gridKey} engine={engineRef.current} practiceData={practiceData} />
       </View>
 
       <ScrollView
@@ -473,12 +489,12 @@ export default function Level2ModeScreen() {
           <Text style={styles.pausedText}>PAUSED</Text>
         </View>
       )}
-
     </View>
   );
 }
 
 const styles = StyleSheet.create({
+  container: { flex: 1, backgroundColor: '#0f0f23', alignItems: 'center', paddingTop: 20 },
   scrollContainer: { flex: 1, backgroundColor: '#0f0f23' },
   scrollContent: { alignItems: 'center', paddingTop: 20, paddingBottom: 40 },
   activeContainer: { flex: 1, backgroundColor: '#0f0f23' },
@@ -486,7 +502,11 @@ const styles = StyleSheet.create({
   activeScrollContent: { flexGrow: 1, paddingBottom: 40 },
   activeInner: { flex: 1, alignItems: 'center', paddingTop: 12 },
   title: { fontSize: 22, color: '#aa66ff', fontWeight: '700', letterSpacing: 1, marginBottom: 2 },
-  subtitle: { fontSize: 13, color: '#667788', marginBottom: 8 },
+  subtitle: { fontSize: 13, color: '#667788', marginBottom: 16 },
+  dashboardGrid: { marginTop: 20, marginBottom: 12, gap: 4 },
+  dashboardGridRow: { flexDirection: 'row', gap: 4 },
+  dashboardGridCell: { width: 48, height: 40, borderWidth: 1, borderRadius: 4, alignItems: 'center', justifyContent: 'center' },
+  dashboardGridText: { fontSize: 13, fontWeight: '700', fontVariant: ['tabular-nums'] },
   headingAreaCompact: { height: 100, width: '100%', justifyContent: 'center', alignItems: 'center', position: 'relative' },
   headingPlaceholderCompact: { height: 100 },
   getReady: { fontSize: 24, color: '#ffab00', fontWeight: '700' },
@@ -511,11 +531,8 @@ const styles = StyleSheet.create({
   secondaryBtnText: { color: '#aabbcc', fontSize: 15, fontWeight: '600' },
   statsLine: { fontSize: 16, color: '#aabbcc', marginTop: 8 },
   statsDetail: { fontSize: 13, color: '#667788', marginTop: 4 },
-  endGrid: { marginTop: 20, marginBottom: 12, gap: 4 },
-  endGridRow: { flexDirection: 'row', gap: 4 },
-  endGridCell: { width: 48, height: 40, borderWidth: 1, borderRadius: 4, alignItems: 'center', justifyContent: 'center' },
-  endGridHeading: { fontSize: 13, fontWeight: '700', fontVariant: ['tabular-nums'] },
-  endGridReps: { fontSize: 9, color: '#667788', fontVariant: ['tabular-nums'] },
+  resetBtn: { position: 'absolute', top: 12, right: 12, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: '#ff5555', borderRadius: 6, zIndex: 20 },
+  resetBtnText: { color: '#ff5555', fontSize: 13, fontWeight: '600' },
   confirmOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.7)', justifyContent: 'center', alignItems: 'center', zIndex: 100 },
   confirmCard: { backgroundColor: '#1a1a2e', borderRadius: 12, paddingHorizontal: 32, paddingVertical: 24, alignItems: 'center', borderWidth: 1, borderColor: '#3a4a5a' },
   confirmTitle: { fontSize: 18, fontWeight: '700', color: '#ffffff', marginBottom: 10 },
@@ -525,6 +542,4 @@ const styles = StyleSheet.create({
   confirmBtnNoText: { fontSize: 15, fontWeight: '600', color: '#aabbcc' },
   confirmBtnYes: { paddingHorizontal: 24, paddingVertical: 10, borderRadius: 8, backgroundColor: '#ff5555' },
   confirmBtnYesText: { fontSize: 15, fontWeight: '600', color: '#ffffff' },
-  resetBtn: { position: 'absolute', top: 12, right: 12, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: '#ff5555', borderRadius: 6, zIndex: 20 },
-  resetBtnText: { color: '#ff5555', fontSize: 13, fontWeight: '600' },
 });

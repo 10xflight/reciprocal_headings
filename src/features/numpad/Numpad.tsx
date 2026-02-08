@@ -1,12 +1,18 @@
 import React, { useCallback, useEffect } from 'react';
 import { StyleSheet, Text, TouchableOpacity, View, Platform } from 'react-native';
 
+type FeedbackState = 'green' | 'amber' | 'red' | undefined;
+
 interface NumpadProps {
   onDigit: (digit: string) => void;
   onClear: () => void;
   onBackspace: () => void;
   disabled?: boolean;
   currentInput?: string;
+  /** When set, shows the correct answer instead of user input (for wrong answers) */
+  showCorrect?: string;
+  /** Feedback state for styling the feedback card */
+  feedbackState?: FeedbackState;
 }
 
 const ROWS = [
@@ -22,6 +28,8 @@ export default function Numpad({
   onBackspace,
   disabled = false,
   currentInput = '',
+  showCorrect,
+  feedbackState,
 }: NumpadProps) {
   // Web keyboard support
   useEffect(() => {
@@ -56,34 +64,56 @@ export default function Numpad({
     [disabled, onDigit, onClear, onBackspace],
   );
 
+  // Determine what to show on the feedback card
+  const showFeedbackCard = feedbackState != null;
+  const cardValue = showCorrect ?? currentInput;
+
+  let cardStyle = styles.cardGreen;
+  if (feedbackState === 'red') {
+    cardStyle = styles.cardRed;
+  } else if (feedbackState === 'amber') {
+    cardStyle = styles.cardAmber;
+  }
+
   return (
     <View style={styles.container}>
       <Text style={styles.tooltip}>Left Hand 1-3, Right Hand 4-0</Text>
 
-      <InputDisplay value={currentInput} />
+      <View style={styles.numpadArea}>
+        {/* Input display */}
+        <InputDisplay value={currentInput} />
 
-      {ROWS.map((row, ri) => (
-        <View key={ri} style={styles.row}>
-          {row.map((key) => {
-            const isControl = key === 'C' || key === '⌫';
-            return (
-              <TouchableOpacity
-                key={key}
-                style={[
-                  styles.key,
-                  isControl && styles.controlKey,
-                  disabled && styles.keyDisabled,
-                ]}
-                activeOpacity={0.5}
-                onPress={() => handlePress(key)}
-                disabled={disabled}
-              >
-                <Text style={[styles.keyText, isControl && styles.controlKeyText]}>{key}</Text>
-              </TouchableOpacity>
-            );
-          })}
-        </View>
-      ))}
+        {/* Numpad keys */}
+        {ROWS.map((row, ri) => (
+          <View key={ri} style={styles.row}>
+            {row.map((key) => {
+              const isControl = key === 'C' || key === '⌫';
+              return (
+                <TouchableOpacity
+                  key={key}
+                  style={[
+                    styles.key,
+                    isControl && styles.controlKey,
+                    disabled && styles.keyDisabled,
+                  ]}
+                  activeOpacity={0.5}
+                  onPress={() => handlePress(key)}
+                  disabled={disabled}
+                >
+                  <Text style={[styles.keyText, isControl && styles.controlKeyText]}>{key}</Text>
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        ))}
+
+        {/* Feedback card overlay */}
+        {showFeedbackCard && (
+          <View style={[styles.feedbackCard, cardStyle]}>
+            <Text style={styles.feedbackCardText}>{cardValue}</Text>
+          </View>
+        )}
+      </View>
     </View>
   );
 }
@@ -103,28 +133,32 @@ function InputDisplay({ value }: { value: string }) {
 const styles = StyleSheet.create({
   container: {
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: 8,
   },
   tooltip: {
-    fontSize: 12,
+    fontSize: 10,
     color: '#888',
-    marginBottom: 12,
+    marginBottom: 8,
     fontStyle: 'italic',
+  },
+  numpadArea: {
+    position: 'relative',
   },
   inputDisplay: {
     flexDirection: 'row',
-    marginBottom: 16,
-    gap: 12,
+    justifyContent: 'center',
+    marginBottom: 10,
+    gap: 8,
   },
   inputDigit: {
-    fontSize: 40,
+    fontSize: 32,
     fontWeight: 'bold',
     color: '#555',
-    width: 48,
+    width: 40,
     textAlign: 'center',
-    borderBottomWidth: 3,
+    borderBottomWidth: 2,
     borderBottomColor: '#333',
-    paddingBottom: 4,
+    paddingBottom: 2,
   },
   inputDigitFilled: {
     color: '#fff',
@@ -132,14 +166,14 @@ const styles = StyleSheet.create({
   },
   row: {
     flexDirection: 'row',
-    gap: 12,
-    marginBottom: 12,
+    gap: 8,
+    marginBottom: 8,
   },
   key: {
-    width: 72,
-    height: 56,
+    width: 56,
+    height: 44,
     backgroundColor: '#1e2a3a',
-    borderRadius: 10,
+    borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -150,12 +184,38 @@ const styles = StyleSheet.create({
     opacity: 0.3,
   },
   keyText: {
-    fontSize: 24,
+    fontSize: 20,
     fontWeight: '600',
     color: '#fff',
   },
   controlKeyText: {
-    fontSize: 18,
+    fontSize: 14,
     color: '#ff6b6b',
+  },
+  feedbackCard: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    borderRadius: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+    zIndex: 10,
+  },
+  cardRed: {
+    backgroundColor: '#dc3545',
+  },
+  cardAmber: {
+    backgroundColor: '#ffab00',
+  },
+  cardGreen: {
+    backgroundColor: '#00c853',
+  },
+  feedbackCardText: {
+    fontSize: 64,
+    fontWeight: 'bold',
+    color: '#ffffff',
+    fontVariant: ['tabular-nums'],
   },
 });

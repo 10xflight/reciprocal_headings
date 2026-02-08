@@ -13,17 +13,19 @@ interface CountdownTimerProps {
   strokeColor?: string;
   /** Hide the seconds text display (ring still shows) */
   hideText?: boolean;
+  /** Size of the timer ring (default 52) */
+  size?: number;
+  /** Stroke width (default 4) */
+  strokeWidth?: number;
 }
 
-const SIZE = 52;
-const STROKE_WIDTH = 4;
-const RADIUS = (SIZE - STROKE_WIDTH) / 2;
-const CIRCUMFERENCE = 2 * Math.PI * RADIUS;
+const DEFAULT_SIZE = 52;
+const DEFAULT_STROKE_WIDTH = 4;
 
 function getColor(elapsed: number, duration: number): string {
   const ratio = elapsed / duration;
-  if (ratio < 0.5) return '#00e676';   // Green: 0-50% (fast zone)
-  return '#ffab00';                     // Yellow: 50-100% (slow zone)
+  if (ratio < 0.6) return '#00e676';   // Green: 0-60% (reflex zone)
+  return '#ffab00';                     // Amber: 60-100% (hesitation zone)
 }
 
 export default function CountdownTimer({
@@ -34,6 +36,8 @@ export default function CountdownTimer({
   resumeFrom = null,
   strokeColor,
   hideText = false,
+  size = DEFAULT_SIZE,
+  strokeWidth = DEFAULT_STROKE_WIDTH,
 }: CountdownTimerProps) {
   const [elapsed, setElapsed] = useState(0);
   const startRef = useRef(0);
@@ -41,6 +45,9 @@ export default function CountdownTimer({
   const onTimeoutRef = useRef(onTimeout);
   onTimeoutRef.current = onTimeout;
   const timedOutRef = useRef(false);
+
+  const radius = (size - strokeWidth) / 2;
+  const circumference = 2 * Math.PI * radius;
 
   useEffect(() => {
     if (frozenTime != null) {
@@ -93,7 +100,7 @@ export default function CountdownTimer({
   }, [running, frozenTime, duration, resumeFrom]);
 
   const progress = Math.min(elapsed / duration, 1);
-  const dashOffset = CIRCUMFERENCE * progress;
+  const dashOffset = circumference * progress;
   const color = strokeColor ?? getColor(elapsed, duration);
 
   // Only show time text when frozen at an actual elapsed time (not 0)
@@ -102,36 +109,36 @@ export default function CountdownTimer({
 
   return (
     <View style={styles.container}>
-      <Svg width={SIZE} height={SIZE} viewBox={`0 0 ${SIZE} ${SIZE}`}>
+      <Svg width={size} height={size} viewBox={`0 0 ${size} ${size}`}>
         {/* Background circle */}
         <Circle
-          cx={SIZE / 2}
-          cy={SIZE / 2}
-          r={RADIUS}
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
           stroke="#1e2a3a"
-          strokeWidth={STROKE_WIDTH}
-          fill="#0f0f23"
+          strokeWidth={strokeWidth}
+          fill="transparent"
         />
         {/* Progress circle — drains counterclockwise */}
         <Circle
-          cx={SIZE / 2}
-          cy={SIZE / 2}
-          r={RADIUS}
+          cx={size / 2}
+          cy={size / 2}
+          r={radius}
           stroke={color}
-          strokeWidth={STROKE_WIDTH}
+          strokeWidth={strokeWidth}
           fill="transparent"
-          strokeDasharray={`${CIRCUMFERENCE}`}
+          strokeDasharray={`${circumference}`}
           strokeDashoffset={dashOffset}
           strokeLinecap="round"
           rotation="-90"
-          origin={`${SIZE / 2}, ${SIZE / 2}`}
+          origin={`${size / 2}, ${size / 2}`}
         />
         {showTime && (
           <SvgText
-            x={SIZE / 2}
-            y={SIZE / 2}
+            x={size / 2}
+            y={size / 2}
             fill="#ffffff"
-            fontSize={11}
+            fontSize={size * 0.21}
             fontWeight="bold"
             textAnchor="middle"
             alignmentBaseline="central"

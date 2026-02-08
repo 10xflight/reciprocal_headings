@@ -421,48 +421,46 @@ export default function LearnModeScreen() {
 
   const isCountdown = phase === 'countdown';
   const isPaused = phase === 'paused';
+  const COMPASS_SIZE = 340;
+  const CENTER_SIZE = 100;
 
   return (
     <View style={styles.container}>
-      <View style={styles.headingArea}>
-        {isCountdown ? (
-          <Text style={styles.getReady}>Get Ready...</Text>
-        ) : (
-          <>
-            {showHeading ? (
-              <HeadingDisplay heading={heading} />
-            ) : (
-              <View style={styles.headingPlaceholder} />
-            )}
-          </>
-        )}
-      </View>
-
       <View style={styles.gridPositioner}>
         <ProgressGrid key={gridKey} engine={engineRef.current} />
       </View>
 
-      <View style={styles.compassRow}>
-        <View style={styles.compassWrap}>
-          <CompassRose
-            onWedgeTap={isCountdown ? () => {} : handleWedgeTap}
-            highlightedWedge={highlightWedge}
-            highlightColor={highlightColor}
-            highlightOutlineOnly={wedgeOutlineOnly}
-            highlightFillColor={wedgeFillColor}
-            secondHighlight={wrongWedge != null ? { wedgeId: wrongWedge, color: 'red' } : undefined}
-            disabled={disabled || isCountdown || isPaused}
-            radialFlash={radialFlash ? { heading: radialFlash } : undefined}
-            arrowStyle={arrowFill}
+      <View style={styles.compassWrapCentered}>
+        <CompassRose
+          onWedgeTap={isCountdown ? () => {} : handleWedgeTap}
+          highlightedWedge={highlightWedge}
+          highlightColor={highlightColor}
+          highlightOutlineOnly={wedgeOutlineOnly}
+          highlightFillColor={wedgeFillColor}
+          secondHighlight={wrongWedge != null ? { wedgeId: wrongWedge, color: 'red' } : undefined}
+          disabled={disabled || isCountdown || isPaused}
+          radialFlash={radialFlash ? { heading: radialFlash } : undefined}
+          arrowStyle={arrowFill}
+          size={COMPASS_SIZE}
+        />
+        <View style={[styles.compassCenterLarge, { width: CENTER_SIZE, height: CENTER_SIZE, marginLeft: -CENTER_SIZE / 2, marginTop: -CENTER_SIZE / 2 }]} pointerEvents="none">
+          <View style={[styles.centerFill, { width: CENTER_SIZE - 10, height: CENTER_SIZE - 10, borderRadius: (CENTER_SIZE - 10) / 2 }]} />
+          <CountdownTimer
+            running={timerRunning}
+            onTimeout={handleTimeout}
+            frozenTime={frozenTime}
+            duration={TIMING.LEVEL1_LIMIT}
+            resumeFrom={resumeFrom}
+            hideText
+            size={CENTER_SIZE}
+            strokeWidth={5}
           />
-          <View style={styles.compassCenter} pointerEvents="none">
-            <CountdownTimer
-              running={timerRunning}
-              onTimeout={handleTimeout}
-              frozenTime={frozenTime}
-              duration={TIMING.LEVEL1_LIMIT}
-              resumeFrom={resumeFrom}
-            />
+          <View style={styles.centerHeadingWrap}>
+            {isCountdown ? (
+              <Text style={styles.centerGetReady}>Ready</Text>
+            ) : showHeading ? (
+              <Text style={styles.centerHeading}>{heading}</Text>
+            ) : null}
           </View>
         </View>
       </View>
@@ -506,11 +504,17 @@ const styles = StyleSheet.create({
   progressSubText: { fontSize: 11, color: '#667788', marginTop: 3 },
   progressBarBg: { width: 120, height: 6, backgroundColor: '#1e2a3a', borderRadius: 3, overflow: 'hidden' },
   progressBarFill: { height: 6, backgroundColor: '#00d4ff', borderRadius: 3 },
-  headingArea: { height: 136, width: '100%', justifyContent: 'center', alignItems: 'center', position: 'relative', overflow: 'hidden' },
+  headingArea: { height: 136, width: '100%', justifyContent: 'center', alignItems: 'center', position: 'relative' },
   compassRow: { position: 'relative', alignSelf: 'center' },
-  gridPositioner: { position: 'absolute', left: 12, top: 60, zIndex: 10 },
+  gridPositioner: { position: 'absolute', left: 12, top: 40, zIndex: 10 },
   compassWrap: { position: 'relative' },
+  compassWrapCentered: { position: 'relative', alignSelf: 'center', marginTop: 40 },
   compassCenter: { position: 'absolute', top: '50%', left: '50%', transform: [{ translateX: -26 }, { translateY: -26 }], zIndex: 50 },
+  compassCenterLarge: { position: 'absolute', top: '50%', left: '50%', zIndex: 50, justifyContent: 'center', alignItems: 'center' },
+  centerFill: { position: 'absolute', backgroundColor: '#0f0f23' },
+  centerHeadingWrap: { position: 'absolute', justifyContent: 'center', alignItems: 'center' },
+  centerHeading: { fontSize: 44, fontWeight: 'bold', color: '#ffffff', fontVariant: ['tabular-nums'] },
+  centerGetReady: { fontSize: 18, fontWeight: '700', color: '#ffab00' },
   headingPlaceholder: { height: 136 },
   getReady: { fontSize: 24, color: '#ffab00', fontWeight: '700' },
   gridContainer: { gap: 1 },

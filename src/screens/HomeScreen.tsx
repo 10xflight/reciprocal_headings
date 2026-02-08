@@ -49,7 +49,7 @@ export default function HomeScreen() {
       <TouchableOpacity
         style={[styles.card, styles.levelCard]}
         activeOpacity={0.7}
-        onPress={() => navigation.navigate('Level2Mode')}
+        onPress={() => navigation.navigate('Level2Menu')}
       >
         <View style={styles.cardHeader}>
           <Text style={styles.stageName}>Level 2 — Reciprocal Packets</Text>

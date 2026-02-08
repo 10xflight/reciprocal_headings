@@ -49,5 +49,7 @@ export interface UserStats {
 
 export const TIMING = {
   LEVEL1_LIMIT: 2000,
+  LEVEL2_LIMIT: 2500, // +500ms for numpad lookup time
+  LEVEL2_OFFSET: 500, // Offset to adjust thresholds for Level 2
   INTER_REP_DELAY: 1000,
 } as const;

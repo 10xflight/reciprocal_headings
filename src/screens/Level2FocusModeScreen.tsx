@@ -1,18 +1,17 @@
 import React, { useState, useCallback, useRef, useEffect, useMemo } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useNavigation, usePreventRemove, useRoute, RouteProp } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
-import CompassRose from '../features/compass/CompassRose';
+import Numpad from '../features/numpad/Numpad';
 import HeadingDisplay from '../features/stimulus/HeadingDisplay';
-import FeedbackOverlay from '../ui/feedback/FeedbackOverlay';
 import CountdownTimer from '../ui/CountdownTimer';
 import { MASTER_SEQUENCE, GRID_PAIRS } from '../core/algorithms/trainingEngine';
 import { FocusDeckEngine } from '../core/algorithms/focusDeckEngine';
 import { SessionManager } from '../state/sessionManager';
 import { useStore } from '../state/store';
-import { FeedbackState, TIMING, CompassDirection } from '../core/types';
-import { HEADING_PACKETS } from '../core/data/headingPackets';
+import { FeedbackState, TIMING } from '../core/types';
+import { calculateReciprocal } from '../core/algorithms/reciprocal';
 
 type SessionPhase = 'countdown' | 'active' | 'paused' | 'complete';
 
@@ -26,7 +25,6 @@ function ProgressGrid({ engine, selectedSet }: { engine: FocusDeckEngine; select
     const isSelected = selectedSet.has(h);
     const isMastered = mastered.has(h);
     const inDeck = deck.has(h);
-    // Unselected = very dim; selected: green=mastered, amber=in-deck, cyan=not-yet-seen
     let cellColor: string;
     let textColor: string;
     let bgColor = 'transparent';
@@ -43,10 +41,9 @@ function ProgressGrid({ engine, selectedSet }: { engine: FocusDeckEngine; select
       textColor = '#ffab00';
       bgColor = 'rgba(255,171,0,0.10)';
     } else {
-      // Selected but not yet seen - use cyan tint to stand out
-      cellColor = '#00d4ff';
-      textColor = '#00d4ff';
-      bgColor = 'rgba(0,212,255,0.08)';
+      cellColor = '#aa66ff';
+      textColor = '#aa66ff';
+      bgColor = 'rgba(170,102,255,0.08)';
     }
 
     return (
@@ -74,12 +71,11 @@ function ProgressGrid({ engine, selectedSet }: { engine: FocusDeckEngine; select
   );
 }
 
-export default function FocusModeScreen() {
+export default function Level2FocusModeScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const route = useRoute<RouteProp<RootStackParamList, 'FocusMode'>>();
+  const route = useRoute<RouteProp<RootStackParamList, 'Level2Focus'>>();
   const { headings } = route.params;
-  const practiceData = useStore((s) => s.practiceData);
-  const saveFocusSelection = useStore((s) => s.saveFocusSelection);
+  const practiceData = useStore((s) => s.level2PracticeData);
 
   // Sort headings: weakest first if practice data, else master sequence order
   const orderedHeadings = useMemo(() => {
@@ -92,7 +88,7 @@ export default function FocusModeScreen() {
       const pb = practiceData[b];
       const scoreA = pa ? pa.avgTime + pa.mistakes * 500 : 9999;
       const scoreB = pb ? pb.avgTime + pb.mistakes * 500 : 9999;
-      return scoreB - scoreA; // weakest (highest score) first
+      return scoreB - scoreA;
     });
   }, [headings, practiceData]);
 
@@ -101,28 +97,18 @@ export default function FocusModeScreen() {
   const [phase, setPhase] = useState<SessionPhase>('countdown');
   const phaseRef = useRef<SessionPhase>('countdown');
   const [heading, setHeading] = useState('');
-  const [feedback, setFeedback] = useState<{
-    state: FeedbackState;
-    correctAnswer?: { reciprocal: string; direction: CompassDirection };
-    message?: string;
-  } | null>(null);
+  const [input, setInput] = useState('');
   const [disabled, setDisabled] = useState(false);
-  const [highlightWedge, setHighlightWedge] = useState<number | undefined>(undefined);
-  const [highlightColor, setHighlightColor] = useState<FeedbackState | undefined>(undefined);
-  const [wrongWedge, setWrongWedge] = useState<number | undefined>(undefined);
-  const [arrowFill, setArrowFill] = useState<'filled-green' | 'filled-yellow' | 'outline'>('filled-green');
-  const [wedgeOutlineOnly, setWedgeOutlineOnly] = useState(false);
-  const [wedgeFillColor, setWedgeFillColor] = useState<FeedbackState | undefined>(undefined);
   const [repKey, setRepKey] = useState(0);
   const [showHeading, setShowHeading] = useState(false);
   const [timerRunning, setTimerRunning] = useState(false);
   const [frozenTime, setFrozenTime] = useState<number | null>(null);
   const [resumeFrom, setResumeFrom] = useState<number | null>(null);
   const resumeFromRef = useRef<number>(0);
-  const [radialFlash, setRadialFlash] = useState<string | undefined>(undefined);
+  const [feedbackColor, setFeedbackColor] = useState<FeedbackState | undefined>(undefined);
+  const [showCorrect, setShowCorrect] = useState<string | undefined>(undefined);
 
   const [masteredCount, setMasteredCount] = useState(0);
-  const [unlockedCount, setUnlockedCount] = useState(1);
   const [totalReps, setTotalReps] = useState(0);
   const [gridKey, setGridKey] = useState(0);
   const selectedSet = useMemo(() => new Set(headings), [headings]);
@@ -154,7 +140,6 @@ export default function FocusModeScreen() {
   const updateStats = useCallback(() => {
     const engine = engineRef.current;
     setMasteredCount(engine.getMasteredCount());
-    setUnlockedCount(engine.getUnlockedCount());
     setTotalReps((r) => r + 1);
     setGridKey((k) => k + 1);
   }, []);
@@ -162,10 +147,6 @@ export default function FocusModeScreen() {
   const stopSession = useCallback(() => {
     setPhase('complete');
     phaseRef.current = 'complete';
-    setFeedback(null);
-    setHighlightWedge(undefined);
-    setHighlightColor(undefined);
-    setWrongWedge(undefined);
     setDisabled(false);
     setTimerRunning(false);
     setFrozenTime(null);
@@ -197,14 +178,10 @@ export default function FocusModeScreen() {
   const clearFeedbackAndAdvance = useCallback(() => {
     if (phaseRef.current !== 'active') return;
 
-    setHighlightWedge(undefined);
-    setHighlightColor(undefined);
-    setWrongWedge(undefined);
-    setWedgeOutlineOnly(false);
-    setWedgeFillColor(undefined);
-    setArrowFill('filled-green');
-    setRadialFlash(undefined);
+    setFeedbackColor(undefined);
+    setShowCorrect(undefined);
     setShowHeading(false);
+    setInput('');
 
     const engine = engineRef.current;
     if (engine.isComplete()) {
@@ -231,69 +208,77 @@ export default function FocusModeScreen() {
     }, TIMING.INTER_REP_DELAY);
   }, []);
 
+  const processAnswer = useCallback((userInput: string, timeMs: number) => {
+    const expected = calculateReciprocal(heading);
+    const isCorrect = userInput === expected;
+
+    // Level 2 offset for grading
+    const adjustedTime = Math.max(0, timeMs - TIMING.LEVEL2_OFFSET);
+    const engine = engineRef.current;
+    const engineResult = engine.recordResult(heading, adjustedTime, isCorrect);
+
+    setFeedbackColor(engineResult.feedbackColor);
+    updateStats();
+
+    if (!isCorrect) {
+      setShowCorrect(expected);
+    }
+
+    setTimeout(() => {
+      setShowCorrect(undefined);
+      clearFeedbackAndAdvance();
+    }, FEEDBACK_HOLD_MS);
+  }, [heading, updateStats, clearFeedbackAndAdvance]);
+
   const handleTimeout = useCallback(() => {
     if (disabled || phase !== 'active') return;
     setDisabled(true);
     setTimerRunning(false);
-    setFrozenTime(TIMING.LEVEL1_LIMIT);
+    setFrozenTime(TIMING.LEVEL2_LIMIT);
 
-    const { result, engineResult } = sessionRef.current.submitResponseFocusDeck(-1, TIMING.LEVEL1_LIMIT);
-    const correctWedge = HEADING_PACKETS[heading]?.wedgeId;
-    setHighlightWedge(correctWedge);
-    setHighlightColor('green');
-    setWedgeOutlineOnly(true);
-    setWedgeFillColor(undefined);
-    setArrowFill('filled-green');
-    setRadialFlash(heading);
+    const expected = calculateReciprocal(heading);
+    const engine = engineRef.current;
+    engine.recordResult(heading, TIMING.LEVEL1_LIMIT, false);
+
+    setFeedbackColor('red');
+    setShowCorrect(expected);
     updateStats();
 
     setTimeout(() => {
+      setShowCorrect(undefined);
       clearFeedbackAndAdvance();
     }, FEEDBACK_HOLD_MS);
   }, [disabled, heading, phase, updateStats, clearFeedbackAndAdvance]);
 
-  const handleWedgeTap = useCallback(
-    (wedgeId: number) => {
-      if (disabled || phase !== 'active') return;
+  // Auto-submit when 2 digits entered
+  useEffect(() => {
+    if (input.length === 2 && !disabled && phase === 'active') {
       setDisabled(true);
-
       const sinceLast = sessionRef.current.getTimeElapsed();
       const totalElapsed = sinceLast + resumeFromRef.current;
       setTimerRunning(false);
       setFrozenTime(totalElapsed);
+      processAnswer(input, totalElapsed);
+    }
+  }, [input, disabled, phase, processAnswer]);
 
-      const { result, engineResult } = sessionRef.current.submitResponseFocusDeck(wedgeId, totalElapsed);
-      const correctWedge = HEADING_PACKETS[heading]?.wedgeId;
-
-      setHighlightWedge(correctWedge);
-      setHighlightColor('green');
-      setArrowFill('filled-green');
-
-      if (engineResult.feedbackColor === 'red') {
-        if (wedgeId !== correctWedge) setWrongWedge(wedgeId);
-        setWedgeOutlineOnly(true);
-        setWedgeFillColor(undefined);
-      } else if (engineResult.feedbackColor === 'amber') {
-        setWedgeOutlineOnly(false);
-        setWedgeFillColor('amber');
-      } else {
-        setWedgeOutlineOnly(false);
-        setWedgeFillColor('green');
-      }
-      setRadialFlash(heading);
-      updateStats();
-
-      setTimeout(() => {
-        clearFeedbackAndAdvance();
-      }, FEEDBACK_HOLD_MS);
+  const handleDigit = useCallback(
+    (digit: string) => {
+      if (disabled || phase !== 'active') return;
+      setInput((prev) => (prev.length < 2 ? prev + digit : prev));
     },
-    [disabled, heading, phase, updateStats, clearFeedbackAndAdvance],
+    [disabled, phase],
   );
 
-  const handleFeedbackComplete = useCallback(() => {
-    setFeedback(null);
-    clearFeedbackAndAdvance();
-  }, [clearFeedbackAndAdvance]);
+  const handleClear = useCallback(() => {
+    if (disabled || phase !== 'active') return;
+    setInput('');
+  }, [disabled, phase]);
+
+  const handleBackspace = useCallback(() => {
+    if (disabled || phase !== 'active') return;
+    setInput((prev) => prev.slice(0, -1));
+  }, [disabled, phase]);
 
   const restartSession = useCallback(() => {
     engineRef.current = new FocusDeckEngine(orderedHeadings);
@@ -301,13 +286,9 @@ export default function FocusModeScreen() {
     setPhase('countdown');
     phaseRef.current = 'countdown';
     setDisabled(false);
-    setFeedback(null);
-    setHighlightWedge(undefined);
-    setHighlightColor(undefined);
-    setWrongWedge(undefined);
-    setWedgeOutlineOnly(false);
-    setWedgeFillColor(undefined);
-    setRadialFlash(undefined);
+    setInput('');
+    setFeedbackColor(undefined);
+    setShowCorrect(undefined);
     setShowHeading(false);
     setTimerRunning(false);
     setFrozenTime(null);
@@ -346,7 +327,7 @@ export default function FocusModeScreen() {
         <Pressable style={styles.primaryBtn} onPress={restartSession}>
           <Text style={styles.primaryBtnText}>Try Again</Text>
         </Pressable>
-        <Pressable style={styles.secondaryBtn} onPress={() => navigation.navigate('FocusSelection')}>
+        <Pressable style={styles.secondaryBtn} onPress={() => navigation.navigate('Level2FocusSelection')}>
           <Text style={styles.secondaryBtnText}>Done</Text>
         </Pressable>
       </View>
@@ -355,108 +336,107 @@ export default function FocusModeScreen() {
 
   const isCountdown = phase === 'countdown';
   const isPaused = phase === 'paused';
-  const COMPASS_SIZE = 340;
-  const CENTER_SIZE = 100;
 
   return (
-    <View style={styles.container}>
+    <View style={styles.activeContainer}>
       <View style={styles.gridPositioner}>
         <ProgressGrid key={gridKey} engine={engineRef.current} selectedSet={selectedSet} />
       </View>
 
-      <View style={styles.compassWrapCentered}>
-        <CompassRose
-          onWedgeTap={isCountdown ? () => {} : handleWedgeTap}
-          highlightedWedge={highlightWedge}
-          highlightColor={highlightColor}
-          highlightOutlineOnly={wedgeOutlineOnly}
-          highlightFillColor={wedgeFillColor}
-          secondHighlight={wrongWedge != null ? { wedgeId: wrongWedge, color: 'red' } : undefined}
-          disabled={disabled || isCountdown || isPaused}
-          radialFlash={radialFlash ? { heading: radialFlash } : undefined}
-          arrowStyle={arrowFill}
-          size={COMPASS_SIZE}
-        />
-        <View style={[styles.compassCenterLarge, { width: CENTER_SIZE, height: CENTER_SIZE, marginLeft: -CENTER_SIZE / 2, marginTop: -CENTER_SIZE / 2 }]} pointerEvents="none">
-          <View style={[styles.centerFill, { width: CENTER_SIZE - 10, height: CENTER_SIZE - 10, borderRadius: (CENTER_SIZE - 10) / 2 }]} />
-          <CountdownTimer
-            running={timerRunning}
-            onTimeout={handleTimeout}
-            frozenTime={frozenTime}
-            duration={TIMING.LEVEL1_LIMIT}
-            resumeFrom={resumeFrom}
-            hideText
-            size={CENTER_SIZE}
-            strokeWidth={5}
-          />
-          <View style={styles.centerHeadingWrap}>
+      <ScrollView
+        style={styles.activeScrollView}
+        contentContainerStyle={styles.activeScrollContent}
+        showsVerticalScrollIndicator={false}
+      >
+        <View style={styles.activeInner}>
+          <View style={styles.headingAreaCompact}>
             {isCountdown ? (
-              <Text style={styles.centerGetReady}>Ready</Text>
-            ) : showHeading ? (
-              <Text style={styles.centerHeading}>{heading}</Text>
-            ) : null}
+              <Text style={styles.getReady}>Get Ready...</Text>
+            ) : (
+              <>
+                {showHeading ? (
+                  <HeadingDisplay heading={heading} size="compact" />
+                ) : (
+                  <View style={styles.headingPlaceholderCompact} />
+                )}
+              </>
+            )}
+          </View>
+
+          <View style={styles.numpadArea}>
+            <View style={styles.timerRow}>
+              <CountdownTimer
+                running={timerRunning}
+                onTimeout={handleTimeout}
+                frozenTime={frozenTime}
+                duration={TIMING.LEVEL2_LIMIT}
+                resumeFrom={resumeFrom}
+              />
+            </View>
+            <Numpad
+              onDigit={handleDigit}
+              onClear={handleClear}
+              onBackspace={handleBackspace}
+              disabled={disabled || isCountdown || isPaused}
+              currentInput={input}
+              showCorrect={showCorrect}
+              feedbackState={feedbackColor}
+            />
+          </View>
+
+          <View style={styles.controlRow}>
+            {isPaused ? (
+              <Pressable style={styles.controlBtn} onPress={resumeSession}>
+                <Text style={[styles.controlBtnText, styles.resumeText]}>Resume</Text>
+              </Pressable>
+            ) : (
+              <Pressable style={styles.controlBtn} onPress={pauseSession}>
+                <Text style={styles.controlBtnText}>Pause</Text>
+              </Pressable>
+            )}
+            <Pressable style={[styles.controlBtn, styles.stopCtrl]} onPress={stopSession}>
+              <Text style={[styles.controlBtnText, styles.stopCtrlText]}>Stop</Text>
+            </Pressable>
           </View>
         </View>
-      </View>
-
-      <View style={styles.controlRow}>
-        {isPaused ? (
-          <Pressable style={styles.controlBtn} onPress={resumeSession}>
-            <Text style={[styles.controlBtnText, { color: '#00e676' }]}>Resume</Text>
-          </Pressable>
-        ) : (
-          <Pressable style={styles.controlBtn} onPress={pauseSession}>
-            <Text style={styles.controlBtnText}>Pause</Text>
-          </Pressable>
-        )}
-        <Pressable style={[styles.controlBtn, { borderColor: '#ff5555' }]} onPress={stopSession}>
-          <Text style={[styles.controlBtnText, { color: '#ff5555' }]}>Stop</Text>
-        </Pressable>
-      </View>
+      </ScrollView>
 
       {isPaused && (
         <View style={styles.pausedBadge} pointerEvents="none">
           <Text style={styles.pausedText}>PAUSED</Text>
         </View>
       )}
-
-      <FeedbackOverlay
-        state={feedback?.state ?? null}
-        correctAnswer={feedback?.correctAnswer}
-        message={feedback?.message}
-        onAnimationComplete={handleFeedbackComplete}
-      />
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0f0f23', alignItems: 'center', paddingTop: 20 },
-  title: { fontSize: 22, color: '#00d4ff', fontWeight: '700', letterSpacing: 1, marginBottom: 2 },
+  activeContainer: { flex: 1, backgroundColor: '#0f0f23' },
+  activeScrollView: { flex: 1 },
+  activeScrollContent: { flexGrow: 1, paddingBottom: 40 },
+  activeInner: { flex: 1, alignItems: 'center', paddingTop: 12 },
+  title: { fontSize: 22, color: '#aa66ff', fontWeight: '700', letterSpacing: 1, marginBottom: 2 },
+  headingAreaCompact: { height: 100, width: '100%', justifyContent: 'center', alignItems: 'center', position: 'relative' },
+  headingPlaceholderCompact: { height: 100 },
+  getReady: { fontSize: 24, color: '#ffab00', fontWeight: '700' },
   gridContainer: { gap: 1 },
   gridRow: { flexDirection: 'row', gap: 1 },
-  gridCell: { width: 28, height: 20, borderWidth: 1, borderRadius: 2, alignItems: 'center', justifyContent: 'center' },
+  gridCell: { width: 28, height: 20, borderWidth: 1, borderRadius: 2, justifyContent: 'center', alignItems: 'center' },
   gridCellText: { fontSize: 8, fontWeight: '700', fontVariant: ['tabular-nums'] },
-  gridPositioner: { position: 'absolute', left: 12, top: 40, zIndex: 10 },
-  headingArea: { height: 136, width: '100%', justifyContent: 'center', alignItems: 'center' },
-  headingPlaceholder: { height: 136 },
-  getReady: { fontSize: 24, color: '#ffab00', fontWeight: '700' },
-  compassRow: { position: 'relative', alignSelf: 'center' },
-  compassWrap: { position: 'relative' },
-  compassWrapCentered: { position: 'relative', alignSelf: 'center', marginTop: 40 },
-  compassCenter: { position: 'absolute', top: '50%', left: '50%', transform: [{ translateX: -26 }, { translateY: -26 }], zIndex: 50 },
-  compassCenterLarge: { position: 'absolute', top: '50%', left: '50%', zIndex: 50, justifyContent: 'center', alignItems: 'center' },
-  centerFill: { position: 'absolute', backgroundColor: '#0f0f23' },
-  centerHeadingWrap: { position: 'absolute', justifyContent: 'center', alignItems: 'center' },
-  centerHeading: { fontSize: 44, fontWeight: 'bold', color: '#ffffff', fontVariant: ['tabular-nums'] },
-  centerGetReady: { fontSize: 18, fontWeight: '700', color: '#ffab00' },
-  controlRow: { flexDirection: 'row', justifyContent: 'center', gap: 12, marginTop: 32 },
+  gridPositioner: { position: 'absolute', left: 12, top: 12, zIndex: 10 },
+  numpadArea: { alignItems: 'center', marginTop: 4 },
+  timerRow: { marginBottom: 8 },
+  controlRow: { flexDirection: 'row', justifyContent: 'center', gap: 12, marginTop: 20, marginBottom: 20 },
   controlBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 6, borderWidth: 1, borderColor: '#3a4a5a' },
   controlBtnText: { color: '#aabbcc', fontSize: 13, fontWeight: '600' },
+  resumeText: { color: '#00e676' },
+  stopCtrl: { borderColor: '#ff5555' },
+  stopCtrlText: { color: '#ff5555' },
   pausedBadge: { position: 'absolute', top: '45%', alignSelf: 'center', backgroundColor: 'rgba(15, 15, 35, 0.85)', paddingHorizontal: 24, paddingVertical: 10, borderRadius: 8, zIndex: 90 },
   pausedText: { fontSize: 24, fontWeight: '700', color: '#ffab00', letterSpacing: 4 },
-  primaryBtn: { marginTop: 24, backgroundColor: '#00d4ff', paddingHorizontal: 36, paddingVertical: 12, borderRadius: 8 },
-  primaryBtnText: { fontSize: 18, fontWeight: '700', color: '#0f0f23' },
+  primaryBtn: { marginTop: 24, backgroundColor: '#aa66ff', paddingHorizontal: 36, paddingVertical: 12, borderRadius: 8 },
+  primaryBtnText: { fontSize: 18, fontWeight: '700', color: '#ffffff' },
   secondaryBtn: { marginTop: 12, borderWidth: 1, borderColor: '#3a4a5a', paddingHorizontal: 28, paddingVertical: 10, borderRadius: 8 },
   secondaryBtnText: { color: '#aabbcc', fontSize: 15, fontWeight: '600' },
   statsLine: { fontSize: 16, color: '#aabbcc', marginTop: 8 },

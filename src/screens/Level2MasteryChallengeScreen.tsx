@@ -3,20 +3,19 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
-import CompassRose from '../features/compass/CompassRose';
+import Numpad from '../features/numpad/Numpad';
 import HeadingDisplay from '../features/stimulus/HeadingDisplay';
-import FeedbackOverlay from '../ui/feedback/FeedbackOverlay';
 import CountdownTimer from '../ui/CountdownTimer';
 import { MasteryChallengeEngine, MASTER_SEQUENCE, GRID_PAIRS } from '../core/algorithms/trainingEngine';
 import { SessionManager } from '../state/sessionManager';
 import { useStore, MasteryHeadingResult } from '../state/store';
-import { FeedbackState, CompassDirection } from '../core/types';
-import { HEADING_PACKETS } from '../core/data/headingPackets';
+import { FeedbackState } from '../core/types';
+import { calculateReciprocal } from '../core/algorithms/reciprocal';
 
 type Phase = 'idle' | 'countdown' | 'active' | 'complete';
 
 const FEEDBACK_HOLD_MS = 1200;
-const CHALLENGE_TIME_LIMIT = 1200;
+const CHALLENGE_TIME_LIMIT = 1700; // 1200 + 500 offset for Level 2
 const INTER_REP_DELAY = 1000;
 
 function formatTime(ms: number): string {
@@ -66,7 +65,6 @@ function ProgressGrid({ results }: { results: Record<string, MasteryHeadingResul
 }
 
 function getSuggestedFocus(results: Record<string, MasteryHeadingResult>): { headings: string[]; tooManyRed: boolean } {
-  // Categorize all headings by status
   const red: string[] = [];
   const amber: string[] = [];
   const green: string[] = [];
@@ -79,7 +77,6 @@ function getSuggestedFocus(results: Record<string, MasteryHeadingResult>): { hea
     else green.push(h);
   }
 
-  // If more than 6 red, or exactly 6 red with any amber, suggest Learn Mode instead
   if (red.length > 6 || (red.length === 6 && amber.length > 0)) {
     return { headings: [], tooManyRed: true };
   }
@@ -89,7 +86,6 @@ function getSuggestedFocus(results: Record<string, MasteryHeadingResult>): { hea
     return { headings: [...red, ...amber, ...green], tooManyRed: false };
   }
 
-  // Fill weakest to strongest: red → amber → green
   const suggested: string[] = [];
 
   for (const h of red) {
@@ -110,20 +106,20 @@ function getSuggestedFocus(results: Record<string, MasteryHeadingResult>): { hea
   return { headings: suggested.slice(0, 6), tooManyRed: false };
 }
 
-export default function MasteryChallengeScreen() {
+export default function Level2MasteryChallengeScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
-  const saveBest = useStore((s) => s.saveMasteryChallengeBest);
-  const existingBest = useStore((s) => s.masteryChallengeBest);
+  const saveBest = useStore((s) => s.saveLevel2MasteryChallengeBest);
+  const existingBest = useStore((s) => s.level2MasteryChallengeBest);
   const previousBestRef = useRef(existingBest);
-  const saveMasteryResults = useStore((s) => s.saveMasteryResults);
-  const importMasteryToPractice = useStore((s) => s.importMasteryToPractice);
-  const saveFocusSelection = useStore((s) => s.saveFocusSelection);
-  const resetMasteryResults = useStore((s) => s.resetMasteryResults);
-  const resetMasteryChallengeBest = useStore((s) => s.resetMasteryChallengeBest);
-  const storedMasteryResults = useStore((s) => s.masteryResults);
-  const storedElapsed = useStore((s) => s.masteryLastElapsed);
-  const storedMistakes = useStore((s) => s.masteryLastMistakes);
-  const storedTotalResponses = useStore((s) => s.masteryLastTotalResponses);
+  const saveMasteryResults = useStore((s) => s.saveLevel2MasteryResults);
+  const importMasteryToPractice = useStore((s) => s.importLevel2MasteryToPractice);
+  const saveFocusSelection = useStore((s) => s.saveLevel2FocusSelection);
+  const resetMasteryResults = useStore((s) => s.resetLevel2MasteryResults);
+  const resetMasteryChallengeBest = useStore((s) => s.resetLevel2MasteryChallengeBest);
+  const storedMasteryResults = useStore((s) => s.level2MasteryResults);
+  const storedElapsed = useStore((s) => s.level2MasteryLastElapsed);
+  const storedMistakes = useStore((s) => s.level2MasteryLastMistakes);
+  const storedTotalResponses = useStore((s) => s.level2MasteryLastTotalResponses);
 
   const hasStoredResults = Object.keys(storedMasteryResults).length > 0;
 
@@ -136,25 +132,16 @@ export default function MasteryChallengeScreen() {
   const [phase, setPhase] = useState<Phase>(hasStoredResults ? 'complete' : 'idle');
   const phaseRef = useRef<Phase>(hasStoredResults ? 'complete' : 'idle');
   const [heading, setHeading] = useState('');
-  const [feedback, setFeedback] = useState<{
-    state: FeedbackState;
-    correctAnswer?: { reciprocal: string; direction: CompassDirection };
-    message?: string;
-  } | null>(null);
+  const [input, setInput] = useState('');
   const [disabled, setDisabled] = useState(false);
-  const [highlightWedge, setHighlightWedge] = useState<number | undefined>(undefined);
-  const [highlightColor, setHighlightColor] = useState<FeedbackState | undefined>(undefined);
-  const [wrongWedge, setWrongWedge] = useState<number | undefined>(undefined);
-  const [arrowFill, setArrowFill] = useState<'filled-green' | 'filled-yellow' | 'outline'>('filled-green');
-  const [wedgeOutlineOnly, setWedgeOutlineOnly] = useState(false);
-  const [wedgeFillColor, setWedgeFillColor] = useState<FeedbackState | undefined>(undefined);
   const [repKey, setRepKey] = useState(0);
   const [showHeading, setShowHeading] = useState(false);
   const [timerRunning, setTimerRunning] = useState(false);
   const [frozenTime, setFrozenTime] = useState<number | null>(null);
   const [resumeFrom, setResumeFrom] = useState<number | null>(null);
   const resumeFromRef = useRef<number>(0);
-  const [radialFlash, setRadialFlash] = useState<string | undefined>(undefined);
+  const [feedbackColor, setFeedbackColor] = useState<FeedbackState | undefined>(undefined);
+  const [showCorrect, setShowCorrect] = useState<string | undefined>(undefined);
 
   const [completed, setCompleted] = useState(0);
   const [elapsed, setElapsed] = useState(hasStoredResults ? storedElapsed : 0);
@@ -162,14 +149,11 @@ export default function MasteryChallengeScreen() {
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const responseTimeSumRef = useRef(0);
   const totalResponsesRef = useRef(0);
-  const rafRef = useRef<number | null>(null);
 
-  // Selection state for complete screen
   const [selectedForFocus, setSelectedForFocus] = useState<Set<string>>(new Set());
   const [practiceDataSaved, setPracticeDataSaved] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
-  // Update elapsed display from sum of response times
   useEffect(() => {
     if (phase === 'active') {
       setElapsed(responseTimeSumRef.current);
@@ -183,22 +167,17 @@ export default function MasteryChallengeScreen() {
   }, [repKey]);
 
   const trackResult = useCallback((h: string, timeMs: number, isCorrect: boolean, isTimeout: boolean) => {
-    // Add response time to sum and count total responses
     responseTimeSumRef.current += timeMs;
     totalResponsesRef.current++;
 
-    // Match engine logic: green only if correct AND fast (<=1200ms)
     const isGreen = isCorrect && timeMs <= CHALLENGE_TIME_LIMIT;
     const isWrong = !isCorrect && !isTimeout;
 
     const existing = resultsRef.current[h];
     if (!existing) {
-      // First attempt: green if correct+fast, amber if timeout or slow, red if wrong
       const status: 'green' | 'amber' | 'red' = isWrong ? 'red' : isGreen ? 'green' : 'amber';
       resultsRef.current[h] = { status, time: timeMs, mistakes: isCorrect ? 0 : 1 };
     } else {
-      // Subsequent attempts: upgrade to worst status
-      // red > amber > green (red = wrong answer, amber = timeout/slow, green = perfect)
       if (isWrong && existing.status !== 'red') {
         existing.status = 'red';
       } else if (!isGreen && existing.status === 'green') {
@@ -206,34 +185,35 @@ export default function MasteryChallengeScreen() {
       }
       existing.mistakes += isCorrect ? 0 : 1;
     }
+
     if (!isCorrect) {
       totalMistakesRef.current++;
     }
+
     setGridKey((k) => k + 1);
   }, []);
 
   const startChallenge = useCallback(() => {
+    previousBestRef.current = existingBest;
     engineRef.current = new MasteryChallengeEngine();
     sessionRef.current = new SessionManager(engineRef.current);
     resultsRef.current = {};
     totalMistakesRef.current = 0;
     responseTimeSumRef.current = 0;
     totalResponsesRef.current = 0;
+    storedTotalResponsesRef.current = 0;
     setPhase('countdown');
     phaseRef.current = 'countdown';
     setDisabled(false);
-    setFeedback(null);
-    setHighlightWedge(undefined);
-    setHighlightColor(undefined);
-    setWrongWedge(undefined);
-    setWedgeOutlineOnly(false);
-    setWedgeFillColor(undefined);
-    setRadialFlash(undefined);
+    setInput('');
+    setFeedbackColor(undefined);
+    setShowCorrect(undefined);
     setShowHeading(false);
     setTimerRunning(false);
     setFrozenTime(null);
     setCompleted(0);
     setElapsed(0);
+    setGridKey(0);
     setSelectedForFocus(new Set());
     setPracticeDataSaved(false);
 
@@ -250,19 +230,15 @@ export default function MasteryChallengeScreen() {
       setFrozenTime(null);
       setResumeFrom(null);
     }, 1000);
-  }, []);
+  }, [existingBest]);
 
   const clearFeedbackAndAdvance = useCallback(() => {
     if (phaseRef.current !== 'active') return;
 
-    setHighlightWedge(undefined);
-    setHighlightColor(undefined);
-    setWrongWedge(undefined);
-    setWedgeOutlineOnly(false);
-    setWedgeFillColor(undefined);
-    setArrowFill('filled-green');
-    setRadialFlash(undefined);
+    setFeedbackColor(undefined);
+    setShowCorrect(undefined);
     setShowHeading(false);
+    setInput('');
 
     const engine = engineRef.current;
     if (engine.isComplete()) {
@@ -270,12 +246,10 @@ export default function MasteryChallengeScreen() {
       setElapsed(totalTime);
       const accuracy = engine.getAccuracy();
       const totalResponses = totalResponsesRef.current;
-      // HPM = (terms answered / time in minutes) × accuracy
       const rawTpm = totalResponses / (totalTime / 60000);
       const finalHpm = rawTpm * accuracy;
-      previousBestRef.current = existingBest; // Capture before save
+      previousBestRef.current = existingBest;
       saveBest(finalHpm, totalTime, accuracy, totalResponses);
-      // Safety: ensure all 36 headings have results (any missing = green, since they were removed from queue)
       for (const h of MASTER_SEQUENCE) {
         if (!resultsRef.current[h]) {
           resultsRef.current[h] = { status: 'green', time: 0, mistakes: 0 };
@@ -304,7 +278,7 @@ export default function MasteryChallengeScreen() {
       setFrozenTime(null);
       setResumeFrom(null);
     }, INTER_REP_DELAY);
-  }, [saveBest, saveMasteryResults]);
+  }, [saveBest, saveMasteryResults, existingBest]);
 
   const handleTimeout = useCallback(() => {
     if (disabled || phase !== 'active') return;
@@ -312,25 +286,22 @@ export default function MasteryChallengeScreen() {
     setTimerRunning(false);
     setFrozenTime(CHALLENGE_TIME_LIMIT);
 
+    const expected = calculateReciprocal(heading);
     const engine = engineRef.current;
-    const result = engine.recordResult(heading, CHALLENGE_TIME_LIMIT, false);
+    engine.recordResult(heading, CHALLENGE_TIME_LIMIT, false);
     setCompleted(36 - engine.getRemaining());
     trackResult(heading, CHALLENGE_TIME_LIMIT, false, true);
 
-    const correctWedge = HEADING_PACKETS[heading]?.wedgeId;
-    setHighlightWedge(correctWedge);
-    setHighlightColor('green');
-    setWedgeOutlineOnly(true);
-    setWedgeFillColor(undefined);
-    setArrowFill('filled-green');
-    setRadialFlash(heading);
+    setFeedbackColor('red');
+    setShowCorrect(expected);
 
     setTimeout(() => {
+      setShowCorrect(undefined);
       clearFeedbackAndAdvance();
     }, FEEDBACK_HOLD_MS);
-  }, [disabled, heading, phase, clearFeedbackAndAdvance, trackResult]);
+  }, [disabled, heading, phase, trackResult, clearFeedbackAndAdvance]);
 
-  // Background timeout - no visual timer, but still enforce time limit
+  // Background timeout
   useEffect(() => {
     if (timerRunning) {
       timeoutRef.current = setTimeout(() => {
@@ -345,52 +316,60 @@ export default function MasteryChallengeScreen() {
     };
   }, [timerRunning, handleTimeout]);
 
-  const handleWedgeTap = useCallback(
-    (wedgeId: number) => {
-      if (disabled || phase !== 'active') return;
-      setDisabled(true);
+  const processAnswer = useCallback((userInput: string, timeMs: number) => {
+    const expected = calculateReciprocal(heading);
+    const isCorrect = userInput === expected;
 
+    const engine = engineRef.current;
+    const result = engine.recordResult(heading, timeMs, isCorrect);
+    setCompleted(36 - engine.getRemaining());
+    trackResult(heading, timeMs, isCorrect, false);
+
+    const isGreen = isCorrect && timeMs <= CHALLENGE_TIME_LIMIT;
+    if (!isCorrect) {
+      setFeedbackColor('red');
+      setShowCorrect(expected);
+    } else if (isGreen) {
+      setFeedbackColor('green');
+    } else {
+      setFeedbackColor('amber');
+    }
+
+    setTimeout(() => {
+      setShowCorrect(undefined);
+      clearFeedbackAndAdvance();
+    }, FEEDBACK_HOLD_MS);
+  }, [heading, trackResult, clearFeedbackAndAdvance]);
+
+  useEffect(() => {
+    if (input.length === 2 && !disabled && phase === 'active') {
+      setDisabled(true);
       const sinceLast = sessionRef.current.getTimeElapsed();
       const totalElapsed = sinceLast + resumeFromRef.current;
       setTimerRunning(false);
       setFrozenTime(totalElapsed);
+      processAnswer(input, totalElapsed);
+    }
+  }, [input, disabled, phase, processAnswer]);
 
-      const correctWedge = HEADING_PACKETS[heading]?.wedgeId;
-      const isCorrect = wedgeId === correctWedge;
-      const engine = engineRef.current;
-      const result = engine.recordResult(heading, totalElapsed, isCorrect);
-      setCompleted(36 - engine.getRemaining());
-      trackResult(heading, totalElapsed, isCorrect, false);
-
-      setHighlightWedge(correctWedge);
-      setHighlightColor('green');
-      setArrowFill('filled-green');
-
-      if (result.feedbackColor === 'green') {
-        setWedgeOutlineOnly(false);
-        setWedgeFillColor('green');
-      } else {
-        if (wedgeId !== correctWedge) {
-          setWrongWedge(wedgeId);
-        }
-        setWedgeOutlineOnly(true);
-        setWedgeFillColor(undefined);
-      }
-      setRadialFlash(heading);
-
-      setTimeout(() => {
-        clearFeedbackAndAdvance();
-      }, FEEDBACK_HOLD_MS);
+  const handleDigit = useCallback(
+    (digit: string) => {
+      if (disabled || phase !== 'active') return;
+      setInput((prev) => (prev.length < 2 ? prev + digit : prev));
     },
-    [disabled, heading, phase, clearFeedbackAndAdvance, trackResult],
+    [disabled, phase],
   );
 
-  const handleFeedbackComplete = useCallback(() => {
-    setFeedback(null);
-    clearFeedbackAndAdvance();
-  }, [clearFeedbackAndAdvance]);
+  const handleClear = useCallback(() => {
+    if (disabled || phase !== 'active') return;
+    setInput('');
+  }, [disabled, phase]);
 
-  // Complete screen helpers
+  const handleBackspace = useCallback(() => {
+    if (disabled || phase !== 'active') return;
+    setInput((prev) => prev.slice(0, -1));
+  }, [disabled, phase]);
+
   const toggleSelection = useCallback((h: string) => {
     setSelectedForFocus((prev) => {
       const next = new Set(prev);
@@ -408,8 +387,8 @@ export default function MasteryChallengeScreen() {
   const handleStartFocus = useCallback(() => {
     const headings = Array.from(selectedForFocus);
     saveFocusSelection(headings);
-    setSelectedForFocus(new Set()); // Clear so returning to Mastery shows fresh state
-    navigation.navigate('FocusMode', { headings });
+    setSelectedForFocus(new Set());
+    navigation.navigate('Level2Focus', { headings });
   }, [selectedForFocus, navigation, saveFocusSelection]);
 
   // IDLE or COMPLETE - unified screen
@@ -419,7 +398,6 @@ export default function MasteryChallengeScreen() {
     const hasResults = resultEntries.length > 0;
     const greenCount = resultEntries.filter((r) => r.status === 'green').length;
     const accuracy = hasResults ? greenCount / resultEntries.length : 0;
-    // HPM = (total responses / time in minutes) × accuracy
     const totalResponses = storedTotalResponsesRef.current || totalResponsesRef.current;
     const rawTpm = elapsed > 0 ? totalResponses / (elapsed / 60000) : 0;
     const hpm = rawTpm * accuracy;
@@ -430,7 +408,6 @@ export default function MasteryChallengeScreen() {
     const suggested = suggestionResult.headings;
     const tooManyRed = suggestionResult.tooManyRed;
 
-    // 6×6 grid
     const gridRows: string[][] = [];
     for (let i = 0; i < MASTER_SEQUENCE.length; i += 6) {
       gridRows.push(MASTER_SEQUENCE.slice(i, i + 6));
@@ -440,7 +417,6 @@ export default function MasteryChallengeScreen() {
       <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.scrollContent}>
         <Text style={styles.title}>Mastery Challenge</Text>
 
-        {/* Score section */}
         {hasResults ? (
           <>
             {isNewBest ? (
@@ -472,7 +448,7 @@ export default function MasteryChallengeScreen() {
           <>
             <Text style={styles.noScoreLine}>No Score Yet</Text>
             <Text style={styles.description}>
-              All 36 headings — 1.2s time limit{'\n'}Correct and fast removes it
+              All 36 headings — 1.7s time limit{'\n'}Correct and fast removes it
             </Text>
             {existingBest && (
               <View style={styles.bestScoreContainer}>
@@ -495,9 +471,8 @@ export default function MasteryChallengeScreen() {
                 const r = results[h];
                 const status = r?.status || 'gray';
                 const isSelected = selectedForFocus.has(h);
-                // Selected tiles use cyan; unselected use status color
-                const color = isSelected ? '#00d4ff' : status === 'green' ? '#00e676' : status === 'amber' ? '#ffab00' : status === 'red' ? '#ff5555' : '#556677';
-                const bgColor = isSelected ? 'rgba(0,212,255,0.15)' : status === 'green' ? 'rgba(0,230,118,0.12)' : status === 'amber' ? 'rgba(255,171,0,0.08)' : status === 'red' ? 'rgba(255,85,85,0.08)' : 'transparent';
+                const color = isSelected ? '#aa66ff' : status === 'green' ? '#00e676' : status === 'amber' ? '#ffab00' : status === 'red' ? '#ff5555' : '#556677';
+                const bgColor = isSelected ? 'rgba(170,102,255,0.15)' : status === 'green' ? 'rgba(0,230,118,0.12)' : status === 'amber' ? 'rgba(255,171,0,0.08)' : status === 'red' ? 'rgba(255,85,85,0.08)' : 'transparent';
 
                 return (
                   <Pressable
@@ -521,7 +496,6 @@ export default function MasteryChallengeScreen() {
 
         {hasResults && (
           <>
-            {/* Update Practice Data - right below tiles, smaller/administrative */}
             <Pressable
               style={[styles.smallBtn, { marginTop: 12 }, practiceDataSaved && styles.btnSaved]}
               onPress={handleUpdatePracticeData}
@@ -532,12 +506,11 @@ export default function MasteryChallengeScreen() {
               </Text>
             </Pressable>
 
-            {/* Suggested Focus */}
             {tooManyRed ? (
               <View style={styles.suggestRow}>
                 <Text style={styles.suggestLabel}>Suggested: </Text>
                 <Text style={styles.suggestLearnMode}>Return to Learn Mode</Text>
-                <Pressable style={styles.acceptBtn} onPress={() => navigation.navigate('LearnMode')}>
+                <Pressable style={styles.acceptBtn} onPress={() => navigation.navigate('Level2Learn')}>
                   <Text style={styles.acceptBtnText}>Go</Text>
                 </Pressable>
               </View>
@@ -557,7 +530,6 @@ export default function MasteryChallengeScreen() {
                   </Pressable>
                 </View>
 
-                {/* Start Focus */}
                 <Pressable
                   style={[styles.primaryBtn, !canStartFocus && styles.btnDisabled]}
                   onPress={handleStartFocus}
@@ -571,13 +543,11 @@ export default function MasteryChallengeScreen() {
           </>
         )}
 
-        {/* Start / Try Again */}
         <Pressable style={styles.primaryBtn} onPress={startChallenge}>
           <Text style={styles.primaryBtnText}>{hasResults ? 'Try Again' : 'Start Challenge'}</Text>
         </Pressable>
 
-        {/* Back */}
-        <Pressable style={styles.secondaryBtn} onPress={() => navigation.navigate('Level1Menu')}>
+        <Pressable style={styles.secondaryBtn} onPress={() => navigation.navigate('Level2Menu')}>
           <Text style={styles.secondaryBtnText}>Back</Text>
         </Pressable>
 
@@ -609,109 +579,96 @@ export default function MasteryChallengeScreen() {
 
   // ACTIVE / COUNTDOWN
   const isCountdown = phase === 'countdown';
-  const COMPASS_SIZE = 340;
-  const CENTER_SIZE = 100;
 
   return (
-    <View style={styles.container}>
+    <View style={styles.activeContainer}>
       <View style={styles.gridPositioner}>
         <ProgressGrid key={gridKey} results={resultsRef.current} />
       </View>
 
-      <View style={styles.compassWrapActive}>
-        <CompassRose
-          onWedgeTap={isCountdown ? () => {} : handleWedgeTap}
-          highlightedWedge={highlightWedge}
-          highlightColor={highlightColor}
-          highlightOutlineOnly={wedgeOutlineOnly}
-          highlightFillColor={wedgeFillColor}
-          secondHighlight={wrongWedge != null ? { wedgeId: wrongWedge, color: 'red' } : undefined}
-          disabled={disabled || isCountdown}
-          radialFlash={radialFlash ? { heading: radialFlash } : undefined}
-          arrowStyle={arrowFill}
-          size={COMPASS_SIZE}
-        />
-        <View style={[styles.compassCenterLarge, { width: CENTER_SIZE, height: CENTER_SIZE, marginLeft: -CENTER_SIZE / 2, marginTop: -CENTER_SIZE / 2 }]} pointerEvents="none">
-          <View style={[styles.centerFill, { width: CENTER_SIZE - 10, height: CENTER_SIZE - 10, borderRadius: (CENTER_SIZE - 10) / 2 }]} />
-          <CountdownTimer
-            running={timerRunning}
-            onTimeout={handleTimeout}
-            frozenTime={frozenTime}
-            duration={CHALLENGE_TIME_LIMIT}
-            resumeFrom={resumeFrom}
-            hideText
-            size={CENTER_SIZE}
-            strokeWidth={5}
-          />
-          <View style={styles.centerHeadingWrap}>
-            {isCountdown ? (
-              <Text style={styles.centerGetReady}>Ready</Text>
-            ) : showHeading ? (
-              <Text style={styles.centerHeading}>{heading}</Text>
-            ) : null}
-          </View>
-        </View>
-      </View>
-
-      <Pressable
-        style={[styles.controlBtn, { borderColor: '#ff5555', marginTop: 32 }]}
-        onPress={() => {
-          // If stored results exist, show them; otherwise go to start menu
-          if (Object.keys(storedMasteryResults).length > 0) {
-            resultsRef.current = { ...storedMasteryResults };
-            totalMistakesRef.current = storedMistakes;
-            setElapsed(storedElapsed);
-            setPhase('complete');
-            phaseRef.current = 'complete';
-          } else {
-            setPhase('idle');
-            phaseRef.current = 'idle';
-          }
-        }}
+      <ScrollView
+        style={styles.activeScrollView}
+        contentContainerStyle={styles.activeScrollContent}
+        showsVerticalScrollIndicator={false}
       >
-        <Text style={[styles.controlBtnText, { color: '#ff5555' }]}>Quit</Text>
-      </Pressable>
+        <View style={styles.activeInner}>
+          <View style={styles.headingAreaCompact}>
+            {isCountdown ? (
+              <Text style={styles.getReady}>Get Ready...</Text>
+            ) : (
+              <>
+                {showHeading ? (
+                  <HeadingDisplay heading={heading} size="compact" />
+                ) : (
+                  <View style={styles.headingPlaceholderCompact} />
+                )}
+              </>
+            )}
+          </View>
 
-      <FeedbackOverlay
-        state={feedback?.state ?? null}
-        correctAnswer={feedback?.correctAnswer}
-        message={feedback?.message}
-        onAnimationComplete={handleFeedbackComplete}
-      />
+          <View style={styles.numpadArea}>
+            <View style={styles.timerRow}>
+              <CountdownTimer
+                running={timerRunning}
+                onTimeout={handleTimeout}
+                frozenTime={frozenTime}
+                duration={CHALLENGE_TIME_LIMIT}
+                resumeFrom={resumeFrom}
+              />
+            </View>
+            <Numpad
+              onDigit={handleDigit}
+              onClear={handleClear}
+              onBackspace={handleBackspace}
+              disabled={disabled || isCountdown}
+              currentInput={input}
+              showCorrect={showCorrect}
+              feedbackState={feedbackColor}
+            />
+          </View>
+
+          <Pressable
+            style={[styles.controlBtn, { borderColor: '#ff5555', marginTop: 20 }]}
+            onPress={() => {
+              if (Object.keys(storedMasteryResults).length > 0) {
+                resultsRef.current = { ...storedMasteryResults };
+                totalMistakesRef.current = storedMistakes;
+                setElapsed(storedElapsed);
+                setPhase('complete');
+                phaseRef.current = 'complete';
+              } else {
+                setPhase('idle');
+                phaseRef.current = 'idle';
+              }
+            }}
+          >
+            <Text style={[styles.controlBtnText, { color: '#ff5555' }]}>Quit</Text>
+          </Pressable>
+        </View>
+      </ScrollView>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0f0f23', alignItems: 'center', paddingTop: 20 },
+  activeContainer: { flex: 1, backgroundColor: '#0f0f23' },
+  activeScrollView: { flex: 1 },
+  activeScrollContent: { flexGrow: 1, paddingBottom: 40 },
+  activeInner: { flex: 1, alignItems: 'center', paddingTop: 12 },
   scrollContainer: { flex: 1, backgroundColor: '#0f0f23' },
   scrollContent: { alignItems: 'center', paddingTop: 20, paddingBottom: 40 },
-  title: { fontSize: 22, color: '#00d4ff', fontWeight: '700', letterSpacing: 1, marginBottom: 8 },
+  title: { fontSize: 22, color: '#aa66ff', fontWeight: '700', letterSpacing: 1, marginBottom: 8 },
   description: { fontSize: 16, color: '#aabbcc', textAlign: 'center', marginTop: 40, lineHeight: 24 },
-  subDescription: { fontSize: 13, color: '#667788', marginTop: 12 },
-  bestScore: { fontSize: 14, color: '#00e676', fontWeight: '600', marginTop: 16 },
-  primaryBtn: { marginTop: 24, backgroundColor: '#00d4ff', paddingHorizontal: 36, paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
-  primaryBtnText: { fontSize: 18, fontWeight: '700', color: '#0f0f23' },
-  primaryBtnHint: { fontSize: 11, color: '#0f0f23', opacity: 0.6, marginTop: 2 },
-  btnDisabled: { opacity: 0.4 },
-  btnSaved: { borderColor: '#00e676' },
-  secondaryBtn: { marginTop: 12, borderWidth: 1, borderColor: '#3a4a5a', paddingHorizontal: 28, paddingVertical: 10, borderRadius: 8 },
-  secondaryBtnText: { color: '#aabbcc', fontSize: 15, fontWeight: '600' },
-  statsRow: { flexDirection: 'row', justifyContent: 'space-between', width: '80%', marginBottom: 4 },
-  statsText: { fontSize: 14, color: '#00d4ff', fontWeight: '600', fontVariant: ['tabular-nums'] },
-  statsRowComplete: { flexDirection: 'row', gap: 16, marginBottom: 4 },
-  statItem: { fontSize: 14, color: '#aabbcc' },
-  headingArea: { height: 136, width: '100%', justifyContent: 'center', alignItems: 'center' },
-  headingPlaceholder: { height: 136 },
+  headingAreaCompact: { height: 100, width: '100%', justifyContent: 'center', alignItems: 'center', position: 'relative' },
+  headingPlaceholderCompact: { height: 100 },
   getReady: { fontSize: 24, color: '#ffab00', fontWeight: '700' },
-  compassWrap: { position: 'relative', alignSelf: 'center', marginTop: 20 },
-  compassWrapActive: { position: 'relative', alignSelf: 'center', marginTop: 40 },
-  compassCenter: { position: 'absolute', top: '50%', left: '50%', transform: [{ translateX: -26 }, { translateY: -26 }], zIndex: 50 },
-  compassCenterLarge: { position: 'absolute', top: '50%', left: '50%', zIndex: 50, justifyContent: 'center', alignItems: 'center' },
-  centerFill: { position: 'absolute', backgroundColor: '#0f0f23' },
-  centerHeadingWrap: { position: 'absolute', justifyContent: 'center', alignItems: 'center' },
-  centerHeading: { fontSize: 44, fontWeight: 'bold', color: '#ffffff', fontVariant: ['tabular-nums'] },
-  centerGetReady: { fontSize: 18, fontWeight: '700', color: '#ffab00' },
+  gridContainer: { gap: 1 },
+  gridRow: { flexDirection: 'row', gap: 1 },
+  gridCell: { width: 28, height: 20, borderWidth: 1, borderRadius: 2, justifyContent: 'center', alignItems: 'center' },
+  gridCellText: { fontSize: 8, fontWeight: '700', fontVariant: ['tabular-nums'] },
+  gridPositioner: { position: 'absolute', left: 12, top: 12, zIndex: 10 },
+  numpadArea: { alignItems: 'center', marginTop: 4 },
+  timerRow: { marginBottom: 8 },
   newBest: { fontSize: 18, color: '#ffab00', fontWeight: '700', marginBottom: 8 },
   scoreLine: { fontSize: 24, color: '#00e676', fontWeight: '700', marginTop: 8 },
   scoreBreakdown: { fontSize: 13, color: '#aabbcc', marginBottom: 8 },
@@ -719,30 +676,32 @@ const styles = StyleSheet.create({
   bestScoreContainer: { alignItems: 'center', marginBottom: 8 },
   bestScoreLine: { fontSize: 14, color: '#667788' },
   bestScoreBreakdown: { fontSize: 11, color: '#556677' },
+  bestScore: { fontSize: 14, color: '#00e676', fontWeight: '600', marginTop: 16 },
   bestScoreBreakdownIdle: { fontSize: 12, color: '#556677', marginTop: 2 },
   tileGrid: { marginTop: 12, gap: 4 },
   tileRow: { flexDirection: 'row', gap: 4 },
   tile: { width: 48, height: 40, borderWidth: 1, borderRadius: 4, alignItems: 'center', justifyContent: 'center' },
   tileSelected: { borderWidth: 3 },
   tileText: { fontSize: 13, fontWeight: '700', fontVariant: ['tabular-nums'] },
-  smallBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#00d4ff' },
-  smallBtnText: { color: '#00d4ff', fontSize: 12, fontWeight: '600' },
+  smallBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#aa66ff' },
+  smallBtnText: { color: '#aa66ff', fontSize: 12, fontWeight: '600' },
+  btnSaved: { borderColor: '#00e676' },
   suggestRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginTop: 16, paddingHorizontal: 16 },
   suggestLabel: { fontSize: 14, color: '#aabbcc', fontWeight: '600' },
   suggestHeading: { fontSize: 15, fontWeight: '700' },
   suggestLearnMode: { fontSize: 14, color: '#ff5555', fontWeight: '600' },
-  acceptBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#00d4ff', marginLeft: 10 },
-  acceptBtnText: { color: '#00d4ff', fontSize: 13, fontWeight: '600' },
-  actionRow: { flexDirection: 'row', gap: 12, marginTop: 4, flexWrap: 'wrap', justifyContent: 'center' },
-  resetBtn: { position: 'absolute', top: 12, right: 12, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: '#ff5555', borderRadius: 6, zIndex: 20 },
-  resetBtnText: { color: '#ff5555', fontSize: 13, fontWeight: '600' },
+  acceptBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#aa66ff', marginLeft: 10 },
+  acceptBtnText: { color: '#aa66ff', fontSize: 13, fontWeight: '600' },
+  primaryBtn: { marginTop: 24, backgroundColor: '#aa66ff', paddingHorizontal: 36, paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
+  primaryBtnText: { fontSize: 18, fontWeight: '700', color: '#ffffff' },
+  primaryBtnHint: { fontSize: 11, color: '#ffffff', opacity: 0.6, marginTop: 2 },
+  btnDisabled: { opacity: 0.4 },
+  secondaryBtn: { marginTop: 12, borderWidth: 1, borderColor: '#3a4a5a', paddingHorizontal: 28, paddingVertical: 10, borderRadius: 8 },
+  secondaryBtnText: { color: '#aabbcc', fontSize: 15, fontWeight: '600' },
   controlBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 6, borderWidth: 1, borderColor: '#3a4a5a' },
   controlBtnText: { color: '#aabbcc', fontSize: 13, fontWeight: '600' },
-  gridContainer: { gap: 1 },
-  gridRow: { flexDirection: 'row', gap: 1 },
-  gridCell: { width: 28, height: 20, borderWidth: 1, borderRadius: 2, alignItems: 'center', justifyContent: 'center' },
-  gridCellText: { fontSize: 8, fontWeight: '700', fontVariant: ['tabular-nums'] },
-  gridPositioner: { position: 'absolute', left: 12, top: 60, zIndex: 10 },
+  resetBtn: { position: 'absolute', top: 12, right: 12, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: '#ff5555', borderRadius: 6, zIndex: 20 },
+  resetBtnText: { color: '#ff5555', fontSize: 13, fontWeight: '600' },
   confirmOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.7)', justifyContent: 'center', alignItems: 'center', zIndex: 100 },
   confirmCard: { backgroundColor: '#1a1a2e', borderRadius: 12, paddingHorizontal: 32, paddingVertical: 24, alignItems: 'center', borderWidth: 1, borderColor: '#3a4a5a' },
   confirmTitle: { fontSize: 18, fontWeight: '700', color: '#ffffff', marginBottom: 10 },

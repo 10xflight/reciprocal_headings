@@ -69,6 +69,17 @@ interface AppState {
   masteryLastMistakes: number;
   masteryLastTotalResponses: number;
 
+  // Level 2 specific data (separate from Level 1)
+  level2PracticeData: Record<string, HeadingPerformance>;
+  level2MasteryResults: Record<string, MasteryHeadingResult>;
+  level2FocusSelection: string[];
+  level2PracticeDataSource: 'mastery' | 'practice' | null;
+  level2PracticeDataUpdatedAt: number | null;
+  level2MasteryChallengeBest: MasteryChallengeBest | null;
+  level2MasteryLastElapsed: number;
+  level2MasteryLastMistakes: number;
+  level2MasteryLastTotalResponses: number;
+
   // Statistics
   stats: UserStats;
 
@@ -88,6 +99,16 @@ interface AppState {
   resetPracticeData: () => void;
   resetMasteryResults: () => void;
   resetMasteryChallengeBest: () => void;
+  // Level 2 actions
+  updateLevel2PracticeData: (heading: string, time: number, isCorrect: boolean) => void;
+  batchUpdateLevel2PracticeData: (entries: { heading: string; time: number; isCorrect: boolean }[], masteredHeadings?: string[]) => void;
+  saveLevel2MasteryResults: (results: Record<string, MasteryHeadingResult>, elapsed: number, mistakes: number, totalResponses: number) => void;
+  importLevel2MasteryToPractice: () => void;
+  saveLevel2FocusSelection: (headings: string[]) => void;
+  resetLevel2PracticeData: () => void;
+  resetLevel2MasteryResults: () => void;
+  saveLevel2MasteryChallengeBest: (score: number, time: number, accuracy: number, totalResponses: number) => void;
+  resetLevel2MasteryChallengeBest: () => void;
   toggleUnlockAllLevels: () => void;
   resetProgress: () => void;
   exportState: () => string;
@@ -116,6 +137,15 @@ export const useStore = create<AppState>()(
       masteryLastElapsed: 0,
       masteryLastMistakes: 0,
       masteryLastTotalResponses: 0,
+      level2PracticeData: {},
+      level2MasteryResults: {},
+      level2FocusSelection: [],
+      level2PracticeDataSource: null,
+      level2PracticeDataUpdatedAt: null,
+      level2MasteryChallengeBest: null,
+      level2MasteryLastElapsed: 0,
+      level2MasteryLastMistakes: 0,
+      level2MasteryLastTotalResponses: 0,
       stats: { ...INITIAL_STATS },
       unlockAllLevels: false,
 
@@ -242,6 +272,92 @@ export const useStore = create<AppState>()(
         set({ masteryChallengeBest: null });
       },
 
+      // Level 2 actions
+      updateLevel2PracticeData: (heading, time, isCorrect) => {
+        set((state) => {
+          const existing = state.level2PracticeData[heading];
+          const reps = (existing?.reps || 0) + 1;
+          const mistakes = (existing?.mistakes || 0) + (isCorrect ? 0 : 1);
+          const avgTime = existing ? (existing.avgTime * existing.reps + time) / reps : time;
+          const status = calculateStatus(avgTime, mistakes, reps);
+          return {
+            level2PracticeData: {
+              ...state.level2PracticeData,
+              [heading]: { avgTime, mistakes, reps, status },
+            },
+          };
+        });
+      },
+
+      batchUpdateLevel2PracticeData: (entries, masteredHeadings = []) => {
+        set((state) => {
+          const updated = { ...state.level2PracticeData };
+          const masteredSet = new Set(masteredHeadings);
+          for (const { heading, time, isCorrect } of entries) {
+            const existing = updated[heading];
+            const reps = (existing?.reps || 0) + 1;
+            const mistakes = (existing?.mistakes || 0) + (isCorrect ? 0 : 1);
+            const avgTime = existing ? (existing.avgTime * existing.reps + time) / reps : time;
+            const raw = calculateStatus(avgTime, mistakes, reps);
+            const status = masteredSet.has(heading) ? 'green' : (raw === 'red' ? 'amber' : raw);
+            updated[heading] = { avgTime, mistakes, reps, status };
+          }
+          for (const h of masteredHeadings) {
+            if (!updated[h]) {
+              updated[h] = { avgTime: 500, mistakes: 0, reps: 1, status: 'green' };
+            } else if (updated[h].status !== 'green') {
+              updated[h] = { ...updated[h], status: 'green' };
+            }
+          }
+          return { level2PracticeData: updated, level2PracticeDataSource: 'practice' as const, level2PracticeDataUpdatedAt: Date.now() };
+        });
+      },
+
+      saveLevel2MasteryResults: (results, elapsed, mistakes, totalResponses) => {
+        set({ level2MasteryResults: results, level2MasteryLastElapsed: elapsed, level2MasteryLastMistakes: mistakes, level2MasteryLastTotalResponses: totalResponses });
+      },
+
+      importLevel2MasteryToPractice: () => {
+        set((state) => {
+          const updated: Record<string, HeadingPerformance> = {};
+          for (const [heading, result] of Object.entries(state.level2MasteryResults)) {
+            updated[heading] = {
+              avgTime: result.time,
+              mistakes: result.mistakes,
+              reps: 1,
+              status: result.status,
+            };
+          }
+          return { level2PracticeData: updated, level2PracticeDataSource: 'mastery' as const, level2PracticeDataUpdatedAt: Date.now() };
+        });
+      },
+
+      saveLevel2FocusSelection: (headings) => {
+        set({ level2FocusSelection: headings });
+      },
+
+      resetLevel2PracticeData: () => {
+        set({ level2PracticeData: {}, level2PracticeDataSource: null, level2PracticeDataUpdatedAt: null });
+      },
+
+      resetLevel2MasteryResults: () => {
+        set({ level2MasteryResults: {}, level2MasteryLastElapsed: 0, level2MasteryLastMistakes: 0, level2MasteryLastTotalResponses: 0 });
+      },
+
+      saveLevel2MasteryChallengeBest: (score, time, accuracy, totalResponses) => {
+        set((state) => {
+          const existing = state.level2MasteryChallengeBest;
+          const isBetter = !existing || score > existing.score || (score === existing.score && accuracy > existing.accuracy);
+          return {
+            level2MasteryChallengeBest: isBetter ? { score, time, accuracy, totalResponses } : state.level2MasteryChallengeBest,
+          };
+        });
+      },
+
+      resetLevel2MasteryChallengeBest: () => {
+        set({ level2MasteryChallengeBest: null });
+      },
+
       toggleUnlockAllLevels: () => {
         set((state) => ({ unlockAllLevels: !state.unlockAllLevels }));
       },
@@ -260,13 +376,22 @@ export const useStore = create<AppState>()(
           masteryLastElapsed: 0,
           masteryLastMistakes: 0,
           masteryLastTotalResponses: 0,
+          level2PracticeData: {},
+          level2MasteryResults: {},
+          level2FocusSelection: [],
+          level2PracticeDataSource: null,
+          level2PracticeDataUpdatedAt: null,
+          level2MasteryChallengeBest: null,
+          level2MasteryLastElapsed: 0,
+          level2MasteryLastMistakes: 0,
+          level2MasteryLastTotalResponses: 0,
           stats: { ...INITIAL_STATS },
         });
       },
 
       exportState: () => {
-        const { deckProgress, level2DeckProgress, trialBestTimes, masteryChallengeBest, stats, practiceData, masteryResults, focusSelection, practiceDataSource, practiceDataUpdatedAt, masteryLastElapsed, masteryLastMistakes, masteryLastTotalResponses } = get();
-        return btoa(JSON.stringify({ deckProgress, level2DeckProgress, trialBestTimes, masteryChallengeBest, stats, practiceData, masteryResults, focusSelection, practiceDataSource, practiceDataUpdatedAt, masteryLastElapsed, masteryLastMistakes, masteryLastTotalResponses }));
+        const { deckProgress, level2DeckProgress, trialBestTimes, masteryChallengeBest, stats, practiceData, masteryResults, focusSelection, practiceDataSource, practiceDataUpdatedAt, masteryLastElapsed, masteryLastMistakes, masteryLastTotalResponses, level2PracticeData, level2MasteryResults, level2FocusSelection, level2PracticeDataSource, level2PracticeDataUpdatedAt, level2MasteryChallengeBest, level2MasteryLastElapsed, level2MasteryLastMistakes, level2MasteryLastTotalResponses } = get();
+        return btoa(JSON.stringify({ deckProgress, level2DeckProgress, trialBestTimes, masteryChallengeBest, stats, practiceData, masteryResults, focusSelection, practiceDataSource, practiceDataUpdatedAt, masteryLastElapsed, masteryLastMistakes, masteryLastTotalResponses, level2PracticeData, level2MasteryResults, level2FocusSelection, level2PracticeDataSource, level2PracticeDataUpdatedAt, level2MasteryChallengeBest, level2MasteryLastElapsed, level2MasteryLastMistakes, level2MasteryLastTotalResponses }));
       },
 
       importState: (data) => {
@@ -289,6 +414,15 @@ export const useStore = create<AppState>()(
             masteryLastElapsed: parsed.masteryLastElapsed || 0,
             masteryLastMistakes: parsed.masteryLastMistakes || 0,
             masteryLastTotalResponses: parsed.masteryLastTotalResponses || 0,
+            level2PracticeData: parsed.level2PracticeData || {},
+            level2MasteryResults: parsed.level2MasteryResults || {},
+            level2FocusSelection: parsed.level2FocusSelection || [],
+            level2PracticeDataSource: parsed.level2PracticeDataSource || null,
+            level2PracticeDataUpdatedAt: parsed.level2PracticeDataUpdatedAt || null,
+            level2MasteryChallengeBest: parsed.level2MasteryChallengeBest || null,
+            level2MasteryLastElapsed: parsed.level2MasteryLastElapsed || 0,
+            level2MasteryLastMistakes: parsed.level2MasteryLastMistakes || 0,
+            level2MasteryLastTotalResponses: parsed.level2MasteryLastTotalResponses || 0,
           });
           return true;
         } catch {
@@ -323,6 +457,15 @@ export const useStore = create<AppState>()(
           masteryLastElapsed: persisted?.masteryLastElapsed ?? 0,
           masteryLastMistakes: persisted?.masteryLastMistakes ?? 0,
           masteryLastTotalResponses: persisted?.masteryLastTotalResponses ?? 0,
+          level2PracticeData: persisted?.level2PracticeData ?? {},
+          level2MasteryResults: persisted?.level2MasteryResults ?? {},
+          level2FocusSelection: persisted?.level2FocusSelection ?? [],
+          level2PracticeDataSource: persisted?.level2PracticeDataSource ?? null,
+          level2PracticeDataUpdatedAt: persisted?.level2PracticeDataUpdatedAt ?? null,
+          level2MasteryChallengeBest: persisted?.level2MasteryChallengeBest ?? null,
+          level2MasteryLastElapsed: persisted?.level2MasteryLastElapsed ?? 0,
+          level2MasteryLastMistakes: persisted?.level2MasteryLastMistakes ?? 0,
+          level2MasteryLastTotalResponses: persisted?.level2MasteryLastTotalResponses ?? 0,
       }),
       partialize: (state) => ({
         deckProgress: state.deckProgress,
@@ -339,6 +482,15 @@ export const useStore = create<AppState>()(
         masteryLastElapsed: state.masteryLastElapsed,
         masteryLastMistakes: state.masteryLastMistakes,
         masteryLastTotalResponses: state.masteryLastTotalResponses,
+        level2PracticeData: state.level2PracticeData,
+        level2MasteryResults: state.level2MasteryResults,
+        level2FocusSelection: state.level2FocusSelection,
+        level2PracticeDataSource: state.level2PracticeDataSource,
+        level2PracticeDataUpdatedAt: state.level2PracticeDataUpdatedAt,
+        level2MasteryChallengeBest: state.level2MasteryChallengeBest,
+        level2MasteryLastElapsed: state.level2MasteryLastElapsed,
+        level2MasteryLastMistakes: state.level2MasteryLastMistakes,
+        level2MasteryLastTotalResponses: state.level2MasteryLastTotalResponses,
       }),
     },
   ),

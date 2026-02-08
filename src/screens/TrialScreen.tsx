@@ -1,6 +1,7 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
+import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import CompassRose from '../features/compass/CompassRose';
 import HeadingDisplay from '../features/stimulus/HeadingDisplay';
 import FeedbackOverlay from '../ui/feedback/FeedbackOverlay';
@@ -16,7 +17,7 @@ type TrialPhase = 'idle' | 'countdown' | 'active' | 'complete';
 
 export default function TrialScreen() {
   const route = useRoute<RouteProp<RootStackParamList, 'Trial'>>();
-  const navigation = useNavigation();
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const headingIds = route.params.headingIds;
   const saveTrialResult = useStore((s) => s.saveTrialResult);
 
@@ -182,7 +183,7 @@ export default function TrialScreen() {
           <Pressable style={styles.primaryBtn} onPress={startTrial}>
             <Text style={styles.primaryBtnText}>Retry</Text>
           </Pressable>
-          <Pressable style={styles.outlineBtn} onPress={() => navigation.goBack()}>
+          <Pressable style={styles.outlineBtn} onPress={() => navigation.navigate('Level1Menu')}>
             <Text style={styles.outlineBtnText}>Back</Text>
           </Pressable>
         </View>
