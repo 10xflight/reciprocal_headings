@@ -471,7 +471,7 @@ export default function Level2MasteryChallengeScreen() {
                 const r = results[h];
                 const status = r?.status || 'gray';
                 const isSelected = selectedForFocus.has(h);
-                const color = isSelected ? '#aa66ff' : status === 'green' ? '#00e676' : status === 'amber' ? '#ffab00' : status === 'red' ? '#ff5555' : '#556677';
+                const color = isSelected ? '#00d4ff' : status === 'green' ? '#00e676' : status === 'amber' ? '#ffab00' : status === 'red' ? '#ff5555' : '#556677';
                 const bgColor = isSelected ? 'rgba(170,102,255,0.15)' : status === 'green' ? 'rgba(0,230,118,0.12)' : status === 'amber' ? 'rgba(255,171,0,0.08)' : status === 'red' ? 'rgba(255,85,85,0.08)' : 'transparent';
 
                 return (
@@ -657,7 +657,7 @@ const styles = StyleSheet.create({
   activeInner: { flex: 1, alignItems: 'center', paddingTop: 12 },
   scrollContainer: { flex: 1, backgroundColor: '#0f0f23' },
   scrollContent: { alignItems: 'center', paddingTop: 20, paddingBottom: 40 },
-  title: { fontSize: 22, color: '#aa66ff', fontWeight: '700', letterSpacing: 1, marginBottom: 8 },
+  title: { fontSize: 22, color: '#00d4ff', fontWeight: '700', letterSpacing: 1, marginBottom: 8 },
   description: { fontSize: 16, color: '#aabbcc', textAlign: 'center', marginTop: 40, lineHeight: 24 },
   headingAreaCompact: { height: 100, width: '100%', justifyContent: 'center', alignItems: 'center', position: 'relative' },
   headingPlaceholderCompact: { height: 100 },
@@ -683,16 +683,16 @@ const styles = StyleSheet.create({
   tile: { width: 48, height: 40, borderWidth: 1, borderRadius: 4, alignItems: 'center', justifyContent: 'center' },
   tileSelected: { borderWidth: 3 },
   tileText: { fontSize: 13, fontWeight: '700', fontVariant: ['tabular-nums'] },
-  smallBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#aa66ff' },
-  smallBtnText: { color: '#aa66ff', fontSize: 12, fontWeight: '600' },
+  smallBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#00d4ff' },
+  smallBtnText: { color: '#00d4ff', fontSize: 12, fontWeight: '600' },
   btnSaved: { borderColor: '#00e676' },
   suggestRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginTop: 16, paddingHorizontal: 16 },
   suggestLabel: { fontSize: 14, color: '#aabbcc', fontWeight: '600' },
   suggestHeading: { fontSize: 15, fontWeight: '700' },
   suggestLearnMode: { fontSize: 14, color: '#ff5555', fontWeight: '600' },
-  acceptBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#aa66ff', marginLeft: 10 },
-  acceptBtnText: { color: '#aa66ff', fontSize: 13, fontWeight: '600' },
-  primaryBtn: { marginTop: 24, backgroundColor: '#aa66ff', paddingHorizontal: 36, paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
+  acceptBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#00d4ff', marginLeft: 10 },
+  acceptBtnText: { color: '#00d4ff', fontSize: 13, fontWeight: '600' },
+  primaryBtn: { marginTop: 24, backgroundColor: '#00d4ff', paddingHorizontal: 36, paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
   primaryBtnText: { fontSize: 18, fontWeight: '700', color: '#ffffff' },
   primaryBtnHint: { fontSize: 11, color: '#ffffff', opacity: 0.6, marginTop: 2 },
   btnDisabled: { opacity: 0.4 },

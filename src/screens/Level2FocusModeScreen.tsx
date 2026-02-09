@@ -41,8 +41,8 @@ function ProgressGrid({ engine, selectedSet }: { engine: FocusDeckEngine; select
       textColor = '#ffab00';
       bgColor = 'rgba(255,171,0,0.10)';
     } else {
-      cellColor = '#aa66ff';
-      textColor = '#aa66ff';
+      cellColor = '#00d4ff';
+      textColor = '#00d4ff';
       bgColor = 'rgba(170,102,255,0.08)';
     }
 
@@ -416,7 +416,7 @@ const styles = StyleSheet.create({
   activeScrollView: { flex: 1 },
   activeScrollContent: { flexGrow: 1, paddingBottom: 40 },
   activeInner: { flex: 1, alignItems: 'center', paddingTop: 12 },
-  title: { fontSize: 22, color: '#aa66ff', fontWeight: '700', letterSpacing: 1, marginBottom: 2 },
+  title: { fontSize: 22, color: '#00d4ff', fontWeight: '700', letterSpacing: 1, marginBottom: 2 },
   headingAreaCompact: { height: 100, width: '100%', justifyContent: 'center', alignItems: 'center', position: 'relative' },
   headingPlaceholderCompact: { height: 100 },
   getReady: { fontSize: 24, color: '#ffab00', fontWeight: '700' },
@@ -435,7 +435,7 @@ const styles = StyleSheet.create({
   stopCtrlText: { color: '#ff5555' },
   pausedBadge: { position: 'absolute', top: '45%', alignSelf: 'center', backgroundColor: 'rgba(15, 15, 35, 0.85)', paddingHorizontal: 24, paddingVertical: 10, borderRadius: 8, zIndex: 90 },
   pausedText: { fontSize: 24, fontWeight: '700', color: '#ffab00', letterSpacing: 4 },
-  primaryBtn: { marginTop: 24, backgroundColor: '#aa66ff', paddingHorizontal: 36, paddingVertical: 12, borderRadius: 8 },
+  primaryBtn: { marginTop: 24, backgroundColor: '#00d4ff', paddingHorizontal: 36, paddingVertical: 12, borderRadius: 8 },
   primaryBtnText: { fontSize: 18, fontWeight: '700', color: '#ffffff' },
   secondaryBtn: { marginTop: 12, borderWidth: 1, borderColor: '#3a4a5a', paddingHorizontal: 28, paddingVertical: 10, borderRadius: 8 },
   secondaryBtnText: { color: '#aabbcc', fontSize: 15, fontWeight: '600' },

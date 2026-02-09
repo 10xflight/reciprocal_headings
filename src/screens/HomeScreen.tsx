@@ -47,7 +47,7 @@ export default function HomeScreen() {
 
       {/* Level 2 - Always available, separate progress */}
       <TouchableOpacity
-        style={[styles.card, styles.level2Card]}
+        style={styles.card}
         activeOpacity={0.7}
         onPress={() => navigation.navigate('Level2Menu')}
       >
@@ -59,13 +59,13 @@ export default function HomeScreen() {
           {(level2Progress.masteredHeadings || []).length}/36 Headings Mastered
         </Text>
         <View style={styles.progressBarBg}>
-          <View style={[styles.progressBarFill, { width: `${((level2Progress.masteredHeadings || []).length / 36) * 100}%`, backgroundColor: '#aa66ff' }]} />
+          <View style={[styles.progressBarFill, { width: `${((level2Progress.masteredHeadings || []).length / 36) * 100}%` }]} />
         </View>
       </TouchableOpacity>
 
       {/* Level 3 - Always available, separate progress */}
       <TouchableOpacity
-        style={[styles.card, styles.level3Card]}
+        style={styles.card}
         activeOpacity={0.7}
         onPress={() => navigation.navigate('Level3Menu')}
       >
@@ -77,7 +77,7 @@ export default function HomeScreen() {
           {(level3Progress.masteredHeadings || []).length}/36 Headings Mastered
         </Text>
         <View style={styles.progressBarBg}>
-          <View style={[styles.progressBarFill, { width: `${((level3Progress.masteredHeadings || []).length / 36) * 100}%`, backgroundColor: '#00c896' }]} />
+          <View style={[styles.progressBarFill, { width: `${((level3Progress.masteredHeadings || []).length / 36) * 100}%` }]} />
         </View>
       </TouchableOpacity>
 
@@ -149,14 +149,8 @@ const styles = StyleSheet.create({
     borderLeftWidth: 4,
     borderLeftColor: '#00d4ff',
   },
-  level2Card: {
-    borderLeftColor: '#aa66ff',
-  },
-  level3Card: {
-    borderLeftColor: '#00c896',
-  },
   levelCard: {
-    borderLeftColor: '#aa66ff',
+    borderLeftColor: '#00d4ff',
   },
   cardLocked: {
     opacity: 0.4,

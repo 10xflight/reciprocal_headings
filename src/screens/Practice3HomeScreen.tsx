@@ -68,7 +68,7 @@ const styles = StyleSheet.create({
   },
   title: {
     fontSize: 22,
-    color: '#00c896',
+    color: '#00d4ff',
     fontWeight: '700',
     letterSpacing: 1,
     marginBottom: 2,
@@ -88,7 +88,7 @@ const styles = StyleSheet.create({
     padding: 16,
     marginBottom: 12,
     borderLeftWidth: 4,
-    borderLeftColor: '#00c896',
+    borderLeftColor: '#00d4ff',
   },
   cardDisabled: {
     opacity: 0.4,
@@ -108,7 +108,7 @@ const styles = StyleSheet.create({
   modeCardAction: {
     fontSize: 14,
     fontWeight: '600',
-    color: '#00c896',
+    color: '#00d4ff',
   },
   textDisabled: {
     color: '#556677',

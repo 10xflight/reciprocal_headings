@@ -79,7 +79,7 @@ export default function Level2FocusSelectionScreen() {
                   key={h}
                   style={[
                     styles.gridCell,
-                    { borderColor: isSelected ? '#aa66ff' : statusColor },
+                    { borderColor: isSelected ? '#00d4ff' : statusColor },
                     !isSelected && perf?.status === 'green' && { backgroundColor: 'rgba(0,230,118,0.12)' },
                     !isSelected && perf?.status === 'amber' && { backgroundColor: 'rgba(255,171,0,0.08)' },
                     !isSelected && perf?.status === 'red' && { backgroundColor: 'rgba(255,85,85,0.08)' },
@@ -88,7 +88,7 @@ export default function Level2FocusSelectionScreen() {
                   ]}
                   onPress={() => toggleHeading(h)}
                 >
-                  <Text style={[styles.gridCellText, { color: isSelected ? '#aa66ff' : statusColor }]}>{h}</Text>
+                  <Text style={[styles.gridCellText, { color: isSelected ? '#00d4ff' : statusColor }]}>{h}</Text>
                 </Pressable>
               );
             })}
@@ -145,7 +145,7 @@ export default function Level2FocusSelectionScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0f0f23', alignItems: 'center', paddingTop: 20 },
-  title: { fontSize: 22, color: '#aa66ff', fontWeight: '700', letterSpacing: 1, marginBottom: 2 },
+  title: { fontSize: 22, color: '#00d4ff', fontWeight: '700', letterSpacing: 1, marginBottom: 2 },
   dataSource: { fontSize: 12, color: '#667788', marginBottom: 4 },
   subtitle: { fontSize: 13, color: '#aabbcc', marginBottom: 16 },
   grid: { gap: 4 },
@@ -159,7 +159,7 @@ const styles = StyleSheet.create({
   utilRow: { flexDirection: 'row', gap: 12, marginTop: 16 },
   utilBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 6, borderWidth: 1, borderColor: '#3a4a5a' },
   utilBtnText: { color: '#aabbcc', fontSize: 13, fontWeight: '600' },
-  primaryBtn: { marginTop: 20, backgroundColor: '#aa66ff', paddingHorizontal: 36, paddingVertical: 12, borderRadius: 8 },
+  primaryBtn: { marginTop: 20, backgroundColor: '#00d4ff', paddingHorizontal: 36, paddingVertical: 12, borderRadius: 8 },
   primaryBtnText: { fontSize: 18, fontWeight: '700', color: '#ffffff' },
   btnDisabled: { opacity: 0.4 },
   secondaryBtn: { marginTop: 12, borderWidth: 1, borderColor: '#3a4a5a', paddingHorizontal: 28, paddingVertical: 10, borderRadius: 8 },
