@@ -51,5 +51,6 @@ export const TIMING = {
   LEVEL1_LIMIT: 2000,
   LEVEL2_LIMIT: 2500, // +500ms for numpad lookup time
   LEVEL2_OFFSET: 500, // Offset to adjust thresholds for Level 2
+  VERBAL_LIMIT: 1500, // Levels 3-5 verbal response time limit
   INTER_REP_DELAY: 1000,
 } as const;

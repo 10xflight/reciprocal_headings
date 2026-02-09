@@ -7,8 +7,6 @@ import { useStore } from '../state/store';
 import { MASTER_SEQUENCE } from '../core/algorithms/trainingEngine';
 
 const LEVEL_INFO = [
-  { id: 2, name: 'Reciprocal Packets', description: 'Type the reciprocal', route: 'Level2Mode' as const },
-  { id: 3, name: 'Vector Orientation', description: 'Say the full packet', route: 'Practice3' as const },
   { id: 4, name: 'Auditory Vector Sense', description: 'Listen and respond', route: 'Practice4' as const },
   { id: 5, name: 'Single Digit Resolution', description: 'Full 3-digit headings', route: 'Practice5' as const },
 ];
@@ -17,11 +15,13 @@ export default function HomeScreen() {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const deckProgress = useStore((s) => s.deckProgress);
   const level2Progress = useStore((s) => s.level2DeckProgress);
+  const level3Progress = useStore((s) => s.level3DeckProgress);
   const unlockAllLevels = useStore((s) => s.unlockAllLevels);
 
   const unlockedCount = deckProgress.unlockedCount;
   const allComplete = unlockedCount >= 36;
   const level2Complete = level2Progress.unlockedCount >= 36;
+  const level3Complete = level3Progress.unlockedCount >= 36;
   // Levels 3-5 require completing Level 1 OR dev mode; Level 2 is always available
   const levels35Unlocked = unlockAllLevels || allComplete;
 
@@ -47,7 +47,7 @@ export default function HomeScreen() {
 
       {/* Level 2 - Always available, separate progress */}
       <TouchableOpacity
-        style={[styles.card, styles.levelCard]}
+        style={[styles.card, styles.level2Card]}
         activeOpacity={0.7}
         onPress={() => navigation.navigate('Level2Menu')}
       >
@@ -63,15 +63,33 @@ export default function HomeScreen() {
         </View>
       </TouchableOpacity>
 
-      {/* Levels 3-5 */}
-      <Text style={[styles.sectionTitle, { marginTop: 32 }]}>Levels 3–5</Text>
+      {/* Level 3 - Always available, separate progress */}
+      <TouchableOpacity
+        style={[styles.card, styles.level3Card]}
+        activeOpacity={0.7}
+        onPress={() => navigation.navigate('Level3Menu')}
+      >
+        <View style={styles.cardHeader}>
+          <Text style={styles.stageName}>Level 3 — Vector Orientation</Text>
+          {level3Complete && <Text style={styles.checkmark}>✓</Text>}
+        </View>
+        <Text style={styles.cardDetail}>
+          {(level3Progress.masteredHeadings || []).length}/36 Headings Mastered
+        </Text>
+        <View style={styles.progressBarBg}>
+          <View style={[styles.progressBarFill, { width: `${((level3Progress.masteredHeadings || []).length / 36) * 100}%`, backgroundColor: '#ff9500' }]} />
+        </View>
+      </TouchableOpacity>
+
+      {/* Levels 4-5 */}
+      <Text style={[styles.sectionTitle, { marginTop: 32 }]}>Levels 4–5</Text>
       <Text style={styles.sectionHint}>
         {levels35Unlocked
-          ? 'Practice reciprocal recall with voice input'
+          ? 'Practice reciprocal recall with audio input'
           : 'Master all 36 headings in Level 1 to unlock (or enable in Settings)'}
       </Text>
 
-      {LEVEL_INFO.filter(l => l.id >= 3).map((level) => (
+      {LEVEL_INFO.filter(l => l.id >= 4).map((level) => (
         <TouchableOpacity
           key={level.id}
           style={[styles.card, styles.levelCard, !levels35Unlocked && styles.cardLocked]}
@@ -130,6 +148,12 @@ const styles = StyleSheet.create({
     marginBottom: 10,
     borderLeftWidth: 4,
     borderLeftColor: '#00d4ff',
+  },
+  level2Card: {
+    borderLeftColor: '#aa66ff',
+  },
+  level3Card: {
+    borderLeftColor: '#ff9500',
   },
   levelCard: {
     borderLeftColor: '#aa66ff',

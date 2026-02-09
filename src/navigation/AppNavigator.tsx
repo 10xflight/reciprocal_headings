@@ -20,6 +20,13 @@ import Level2FocusSelectionScreen from '../screens/Level2FocusSelectionScreen';
 import Level2FocusModeScreen from '../screens/Level2FocusModeScreen';
 import Level2OptimizeModeScreen from '../screens/Level2OptimizeModeScreen';
 import Level2MasteryChallengeScreen from '../screens/Level2MasteryChallengeScreen';
+import Level3MenuScreen from '../screens/Level3MenuScreen';
+import Practice3HomeScreen from '../screens/Practice3HomeScreen';
+import Level3ModeScreen from '../screens/Level3ModeScreen';
+import Level3FocusSelectionScreen from '../screens/Level3FocusSelectionScreen';
+import Level3FocusModeScreen from '../screens/Level3FocusModeScreen';
+import Level3OptimizeModeScreen from '../screens/Level3OptimizeModeScreen';
+import Level3MasteryChallengeScreen from '../screens/Level3MasteryChallengeScreen';
 import Level2Screen from '../features/levels/Level2/Level2Screen';
 import Level3Screen from '../features/levels/Level3/Level3Screen';
 import Level4Screen from '../features/levels/Level4/Level4Screen';
@@ -43,6 +50,13 @@ export type RootStackParamList = {
   Level2Optimize: undefined;
   Level2MasteryChallenge: undefined;
   Level2Mode: undefined;
+  Level3Menu: undefined;
+  Practice3Home: undefined;
+  Level3Learn: undefined;
+  Level3FocusSelection: undefined;
+  Level3Focus: { headings: string[] };
+  Level3Optimize: undefined;
+  Level3MasteryChallenge: undefined;
   Practice2: undefined;
   Practice3: undefined;
   Practice4: undefined;
@@ -161,6 +175,41 @@ export default function AppNavigator() {
         name="Level2Mode"
         component={Level2ModeScreen}
         options={{ title: 'Level 2 Mode', headerLeft: () => <BackButton to="Home" /> }}
+      />
+      <Stack.Screen
+        name="Level3Menu"
+        component={Level3MenuScreen}
+        options={{ title: 'Level 3', headerLeft: () => <BackButton to="Home" /> }}
+      />
+      <Stack.Screen
+        name="Practice3Home"
+        component={Practice3HomeScreen}
+        options={{ title: 'Practice Mode', headerLeft: () => <BackButton to="Level3Menu" /> }}
+      />
+      <Stack.Screen
+        name="Level3Learn"
+        component={Level3ModeScreen}
+        options={{ title: 'Learn Mode', headerLeft: () => <BackButton to="Practice3Home" /> }}
+      />
+      <Stack.Screen
+        name="Level3FocusSelection"
+        component={Level3FocusSelectionScreen}
+        options={{ title: 'Focus — Select Headings', headerLeft: () => <BackButton to="Practice3Home" /> }}
+      />
+      <Stack.Screen
+        name="Level3Focus"
+        component={Level3FocusModeScreen}
+        options={{ title: 'Focus Mode', headerLeft: () => <BackButton to="Level3FocusSelection" /> }}
+      />
+      <Stack.Screen
+        name="Level3Optimize"
+        component={Level3OptimizeModeScreen}
+        options={{ title: 'Optimize Mode', headerLeft: () => <BackButton to="Practice3Home" /> }}
+      />
+      <Stack.Screen
+        name="Level3MasteryChallenge"
+        component={Level3MasteryChallengeScreen}
+        options={{ title: 'Mastery Challenge', headerLeft: () => <BackButton to="Level3Menu" /> }}
       />
       <Stack.Screen
         name="Practice2"
