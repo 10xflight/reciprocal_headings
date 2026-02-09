@@ -77,7 +77,7 @@ export default function HomeScreen() {
           {(level3Progress.masteredHeadings || []).length}/36 Headings Mastered
         </Text>
         <View style={styles.progressBarBg}>
-          <View style={[styles.progressBarFill, { width: `${((level3Progress.masteredHeadings || []).length / 36) * 100}%`, backgroundColor: '#ff9500' }]} />
+          <View style={[styles.progressBarFill, { width: `${((level3Progress.masteredHeadings || []).length / 36) * 100}%`, backgroundColor: '#00c896' }]} />
         </View>
       </TouchableOpacity>
 
@@ -153,7 +153,7 @@ const styles = StyleSheet.create({
     borderLeftColor: '#aa66ff',
   },
   level3Card: {
-    borderLeftColor: '#ff9500',
+    borderLeftColor: '#00c896',
   },
   levelCard: {
     borderLeftColor: '#aa66ff',
