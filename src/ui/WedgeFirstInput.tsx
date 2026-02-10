@@ -219,6 +219,9 @@ export default function WedgeFirstInput({
   const [selectedHeading, setSelectedHeading] = useState<string | null>(null);
   const [selectedWedge, setSelectedWedge] = useState<number | null>(null);
   const [submittedAnswer, setSubmittedAnswer] = useState<string>(''); // Full answer text
+  const [isDragging, setIsDragging] = useState(false);
+  const lastHoveredHeadingRef = useRef<string | null>(null);
+  const hasSubmittedRef = useRef(false);
 
   // Reset when heading changes
   useEffect(() => {
@@ -228,6 +231,9 @@ export default function WedgeFirstInput({
     setSelectedHeading(null);
     setSelectedWedge(null);
     setSubmittedAnswer('');
+    setIsDragging(false);
+    lastHoveredHeadingRef.current = null;
+    hasSubmittedRef.current = false;
   }, [heading]);
 
   // Reset when feedback ends
@@ -240,6 +246,9 @@ export default function WedgeFirstInput({
       setSelectedHeading(null);
       setSelectedWedge(null);
       setSubmittedAnswer('');
+      setIsDragging(false);
+      lastHoveredHeadingRef.current = null;
+      hasSubmittedRef.current = false;
     }
     prevShowFeedback.current = showFeedback;
   }, [showFeedback]);
@@ -251,6 +260,19 @@ export default function WedgeFirstInput({
     return { x, y };
   }, [containerLayout]);
 
+  // Submit answer helper - called from multiple gesture paths
+  const submitAnswer = useCallback((headingHit: string, wedge: number) => {
+    if (hasSubmittedRef.current) return; // Prevent double submission
+    hasSubmittedRef.current = true;
+
+    setSelectedHeading(headingHit);
+    setSelectedWedge(wedge);
+    const dirLabel = DIRECTION_LABELS[DIRECTIONS[wedge]];
+    setSubmittedAnswer(`${headingHit} ${dirLabel}`);
+    setIsDragging(false);
+    onAnswer(headingHit, wedge, 0);
+  }, [onAnswer]);
+
   const handlePointerDown = useCallback((pageX: number, pageY: number) => {
     if (disabled || showFeedback) return;
 
@@ -261,15 +283,17 @@ export default function WedgeFirstInput({
     if (distance < WEDGE_INNER) {
       if (expandedWedge !== null) {
         setExpandedWedge(null);
+        setIsDragging(false);
       }
       return;
     }
 
     // Check if clicking outside compass entirely - close expanded wedge
     const outerBoundary = expandedWedge !== null ? HEADING_RING_OUTER : WEDGE_OUTER;
-    if (distance > outerBoundary + 10) {
+    if (distance > outerBoundary + 20) {
       if (expandedWedge !== null) {
         setExpandedWedge(null);
+        setIsDragging(false);
       }
       return;
     }
@@ -281,6 +305,9 @@ export default function WedgeFirstInput({
       setExpandedWedge(wedgeIndex);
       setHoveredWedge(null);
       setHoveredHeading(null);
+      setIsDragging(true);
+      lastHoveredHeadingRef.current = null;
+      hasSubmittedRef.current = false;
       return;
     }
 
@@ -289,6 +316,9 @@ export default function WedgeFirstInput({
       const headingHit = getHeadingButtonFromAngle(angle, distance, expandedWedge);
       if (headingHit) {
         setHoveredHeading(headingHit);
+        lastHoveredHeadingRef.current = headingHit;
+        setIsDragging(true);
+        hasSubmittedRef.current = false;
       }
     }
   }, [disabled, showFeedback, getRelativePosition, expandedWedge]);
@@ -304,6 +334,13 @@ export default function WedgeFirstInput({
       if (distance >= HEADING_RING_INNER - 10 && distance <= HEADING_RING_OUTER + 10) {
         const headingHit = getHeadingButtonFromAngle(angle, distance, expandedWedge);
         setHoveredHeading(headingHit);
+        if (headingHit) {
+          lastHoveredHeadingRef.current = headingHit;
+        }
+      } else if (isDragging && distance > HEADING_RING_OUTER + 10 && lastHoveredHeadingRef.current) {
+        // Dragging past outer edge - auto-submit the last hovered heading
+        submitAnswer(lastHoveredHeadingRef.current, expandedWedge);
+        setHoveredHeading(null);
       } else {
         setHoveredHeading(null);
       }
@@ -316,7 +353,7 @@ export default function WedgeFirstInput({
         setHoveredWedge(null);
       }
     }
-  }, [disabled, showFeedback, getRelativePosition, expandedWedge]);
+  }, [disabled, showFeedback, getRelativePosition, expandedWedge, isDragging, submitAnswer]);
 
   const handlePointerUp = useCallback((pageX: number, pageY: number) => {
     if (disabled || showFeedback) return;
@@ -324,27 +361,21 @@ export default function WedgeFirstInput({
     const { x, y } = getRelativePosition(pageX, pageY);
     const { angle, distance } = getAngleAndDistance(x, y, 0, 0);
 
-    if (expandedWedge !== null) {
-      // Check if releasing on a heading button (completes the swipe/drag)
+    if (expandedWedge !== null && !hasSubmittedRef.current) {
+      // Check if releasing on a heading button (completes the swipe/drag or tap)
       if (distance >= HEADING_RING_INNER - 10 && distance <= HEADING_RING_OUTER + 10) {
         const headingHit = getHeadingButtonFromAngle(angle, distance, expandedWedge);
         if (headingHit) {
-          // Submit answer
-          setSelectedHeading(headingHit);
-          setSelectedWedge(expandedWedge);
-          // Build submitted answer text: "18 South"
-          const dirLabel = DIRECTION_LABELS[DIRECTIONS[expandedWedge]];
-          setSubmittedAnswer(`${headingHit} ${dirLabel}`);
-          onAnswer(headingHit, expandedWedge, 0); // elapsed will be calculated by parent
+          submitAnswer(headingHit, expandedWedge);
         }
       }
       // If released on wedge area or elsewhere, wedge stays open (user can tap heading or tap outside to close)
     }
-    // Wedge expansion on press is already handled in handlePointerDown
 
+    setIsDragging(false);
     setHoveredWedge(null);
     setHoveredHeading(null);
-  }, [disabled, showFeedback, getRelativePosition, expandedWedge, onAnswer]);
+  }, [disabled, showFeedback, getRelativePosition, expandedWedge, submitAnswer]);
 
   // Measure SVG container position
   const onLayout = useCallback(() => {
@@ -380,6 +411,7 @@ export default function WedgeFirstInput({
         handlersRef.current.handlePointerUp(evt.nativeEvent.pageX, evt.nativeEvent.pageY);
       },
       onPanResponderTerminate: () => {
+        setIsDragging(false);
         setHoveredWedge(null);
         setHoveredHeading(null);
       },
