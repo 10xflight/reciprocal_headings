@@ -3,30 +3,24 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
-import HeadingDisplay from '../features/stimulus/HeadingDisplay';
-import CountdownTimer from '../ui/CountdownTimer';
+import WedgeFirstInput from '../ui/WedgeFirstInput';
 import { MasteryChallengeEngine, MASTER_SEQUENCE, GRID_PAIRS } from '../core/algorithms/trainingEngine';
 import { SessionManager } from '../state/sessionManager';
 import { useStore, MasteryHeadingResult } from '../state/store';
-import { FeedbackState } from '../core/types';
 import { calculateReciprocal } from '../core/algorithms/reciprocal';
 import { HEADING_PACKETS } from '../core/data/headingPackets';
-import { getVoiceService } from '../features/voice/getVoiceService';
-import { matchVoiceToHeading, normalizeSpokenText, buildExpectedPhrase } from '../features/voice/ResponseParser';
 
 type Phase = 'idle' | 'countdown' | 'active' | 'complete';
 
 const FEEDBACK_HOLD_MS = 1200;
-// Timeout at 3500ms raw time = 3000ms scoring time (after 500ms STT adjustment)
-const CHALLENGE_TIME_LIMIT = 3500;
 const INTER_REP_DELAY = 1000;
 
-// Level 3 grading thresholds
-const STT_LATENCY = 500;
-const GREEN_THRESHOLD = 2200;
+// Level 3 timing: Level 1 thresholds + 1.0s
+// Level 1: Green ≤1.0s, Amber 1.0-2.0s, Timeout >2.0s
+// Level 3: Green ≤2.0s, Amber 2.0-3.0s, Timeout >3.0s
+const GREEN_THRESHOLD = 2000;
 const SLOW_THRESHOLD = 3000;
-const TIMER_GREEN_THRESHOLD = GREEN_THRESHOLD + STT_LATENCY;
-const TIMER_AMBER_THRESHOLD = SLOW_THRESHOLD + STT_LATENCY;
+const CHALLENGE_TIME_LIMIT = 3000;
 
 function formatTime(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
@@ -137,14 +131,10 @@ export default function Level3MasteryChallengeScreen() {
   const [frozenTime, setFrozenTime] = useState<number | null>(null);
   const [resumeFrom, setResumeFrom] = useState<number | null>(null);
   const resumeFromRef = useRef<number>(0);
-  const [feedbackColor, setFeedbackColor] = useState<FeedbackState | undefined>(undefined);
-  const [showCorrect, setShowCorrect] = useState<string | undefined>(undefined);
-  const [showDirection, setShowDirection] = useState<string | undefined>(undefined);
 
   const [completed, setCompleted] = useState(0);
   const [elapsed, setElapsed] = useState(hasStoredResults ? storedElapsed : 0);
   const [gridKey, setGridKey] = useState(0);
-  const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const responseTimeSumRef = useRef(0);
   const totalResponsesRef = useRef(0);
 
@@ -152,12 +142,16 @@ export default function Level3MasteryChallengeScreen() {
   const [practiceDataSaved, setPracticeDataSaved] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
-  // Voice recognition state
-  const [isListening, setIsListening] = useState(false);
-  const [recognizedText, setRecognizedText] = useState('');
-  const answerProcessedRef = useRef(false);
-  const processDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const lastPartialTextRef = useRef('');
+  // WedgeFirstInput feedback state
+  const [feedbackState, setFeedbackState] = useState<{ correct: boolean; fast: boolean } | null>(null);
+  const [showFeedback, setShowFeedback] = useState(false);
+
+  // Timer state
+  const [timerProgress, setTimerProgress] = useState(0);
+  const [timerColor, setTimerColor] = useState('#00e676');
+  const timerStartRef = useRef<number>(0);
+  const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const handleTimeoutRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (phase === 'active') {
@@ -171,22 +165,61 @@ export default function Level3MasteryChallengeScreen() {
     }
   }, [repKey]);
 
-  const trackResult = useCallback((h: string, scoringTime: number, isCorrect: boolean, isTimeout: boolean) => {
-    responseTimeSumRef.current += scoringTime;
+  // Timer tick function
+  const startTimer = useCallback(() => {
+    timerStartRef.current = Date.now() - (resumeFromRef.current || 0);
+    const initialElapsed = resumeFromRef.current || 0;
+    const initialProgress = Math.min(initialElapsed / CHALLENGE_TIME_LIMIT, 1);
+    setTimerProgress(initialProgress);
+
+    const tick = () => {
+      if (phaseRef.current !== 'active') return;
+      const elapsed = Date.now() - timerStartRef.current;
+      const progress = Math.min(elapsed / CHALLENGE_TIME_LIMIT, 1);
+      setTimerProgress(progress);
+
+      if (elapsed < GREEN_THRESHOLD) {
+        setTimerColor('#00e676');
+      } else if (elapsed < SLOW_THRESHOLD) {
+        setTimerColor('#ffab00');
+      } else {
+        setTimerColor('#ff1744');
+      }
+
+      if (elapsed >= CHALLENGE_TIME_LIMIT) {
+        handleTimeoutRef.current?.();
+      }
+    };
+
+    if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    timerIntervalRef.current = setInterval(tick, 50);
+    tick();
+  }, []);
+
+  const stopTimer = useCallback(() => {
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
+    }
+  }, []);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => stopTimer();
+  }, [stopTimer]);
+
+  const trackResult = useCallback((h: string, timeMs: number, isCorrect: boolean) => {
+    responseTimeSumRef.current += timeMs;
     totalResponsesRef.current++;
 
-    // Determine status based on Level 3 thresholds (2.2s/3.0s)
-    // scoringTime is already STT-adjusted
-    const isGreen = isCorrect && scoringTime <= GREEN_THRESHOLD;
-    const isAmber = isCorrect && scoringTime > GREEN_THRESHOLD && scoringTime <= SLOW_THRESHOLD;
+    const isGreen = isCorrect && timeMs <= GREEN_THRESHOLD;
     const isWrong = !isCorrect;
 
     const existing = resultsRef.current[h];
     if (!existing) {
       const status: 'green' | 'amber' | 'red' = isWrong ? 'red' : isGreen ? 'green' : 'amber';
-      resultsRef.current[h] = { status, time: scoringTime, mistakes: isCorrect ? 0 : 1 };
+      resultsRef.current[h] = { status, time: timeMs, mistakes: isCorrect ? 0 : 1 };
     } else {
-      // Upgrade status on subsequent attempts (worst status wins)
       if (isWrong && existing.status !== 'red') {
         existing.status = 'red';
       } else if (!isGreen && existing.status === 'green') {
@@ -210,9 +243,8 @@ export default function Level3MasteryChallengeScreen() {
     setPhase('countdown');
     phaseRef.current = 'countdown';
     setDisabled(false);
-    setFeedbackColor(undefined);
-    setShowCorrect(undefined);
-    setShowDirection(undefined);
+    setFeedbackState(null);
+    setShowFeedback(false);
     setShowHeading(false);
     setTimerRunning(false);
     setFrozenTime(null);
@@ -220,8 +252,6 @@ export default function Level3MasteryChallengeScreen() {
     setElapsed(0);
     setSelectedForFocus(new Set());
     setPracticeDataSaved(false);
-    setRecognizedText('');
-    setIsListening(false);
 
     setTimeout(() => {
       if (phaseRef.current !== 'countdown') return;
@@ -235,22 +265,20 @@ export default function Level3MasteryChallengeScreen() {
       setTimerRunning(true);
       setFrozenTime(null);
       setResumeFrom(null);
-      setIsListening(true);
-      answerProcessedRef.current = false;
+      startTimer();
     }, 1000);
-  }, []);
+  }, [startTimer]);
 
   const clearFeedbackAndAdvance = useCallback(() => {
     if (phaseRef.current !== 'active') return;
 
-    setFeedbackColor(undefined);
-    setShowCorrect(undefined);
-    setShowDirection(undefined);
+    setShowFeedback(false);
+    setFeedbackState(null);
     setShowHeading(false);
-    setRecognizedText('');
 
     const engine = engineRef.current;
     if (engine.isComplete()) {
+      stopTimer();
       const totalTime = responseTimeSumRef.current;
       setElapsed(totalTime);
       const accuracy = engine.getAccuracy();
@@ -268,12 +296,13 @@ export default function Level3MasteryChallengeScreen() {
       storedTotalResponsesRef.current = totalResponses;
       setPhase('complete');
       phaseRef.current = 'complete';
-      setIsListening(false);
       return;
     }
 
+    stopTimer();
     setTimerRunning(false);
-    setFrozenTime(0);
+    setTimerProgress(0);
+    setTimerColor('#00e676');
 
     setTimeout(() => {
       if (phaseRef.current !== 'active') return;
@@ -287,229 +316,69 @@ export default function Level3MasteryChallengeScreen() {
       setTimerRunning(true);
       setFrozenTime(null);
       setResumeFrom(null);
-      setIsListening(true);
-      answerProcessedRef.current = false;
+      startTimer();
     }, INTER_REP_DELAY);
-  }, [saveBest, saveMasteryResults, existingBest]);
+  }, [stopTimer, startTimer, saveBest, saveMasteryResults, existingBest]);
 
-  const handleTimeout = useCallback(async () => {
-    if (answerProcessedRef.current || disabled || phase !== 'active') return;
-    answerProcessedRef.current = true;
+  const handleTimeout = useCallback(() => {
+    if (disabled || phase !== 'active') return;
+    stopTimer();
     setDisabled(true);
     setTimerRunning(false);
-    setFrozenTime(CHALLENGE_TIME_LIMIT);
-    setIsListening(false);
 
-    // Stop voice recognition and try to get any result
-    const service = getVoiceService();
-    const result = await service.stop();
-
-    const expected = buildExpectedPhrase(heading);
-    const timeoutScoringTime = CHALLENGE_TIME_LIMIT - STT_LATENCY;
-    const timeoutEngineTime = 3000; // Always red for timeout
-
-    // Check if we got a valid answer even though time ran out
-    if (result && result.text) {
-      setRecognizedText(result.text);
-      const match = matchVoiceToHeading(heading, result.text);
-
-      const engine = engineRef.current;
-      engine.recordResult(heading, timeoutEngineTime, match.isMatch);
-      setCompleted(36 - engine.getRemaining());
-      trackResult(heading, timeoutScoringTime, match.isMatch, true);
-
-      // Timeout means > 3.0s scoring time, so red if correct (too slow) or wrong
-      setFeedbackColor('red');
-      setShowCorrect(expected.reciprocal);
-      setShowDirection(expected.direction);
-
-      setTimeout(() => {
-        clearFeedbackAndAdvance();
-      }, FEEDBACK_HOLD_MS);
-      return;
-    }
-
-    // No valid answer - mark as failed
     const engine = engineRef.current;
-    engine.recordResult(heading, timeoutEngineTime, false);
+    engine.recordResult(heading, 3000, false);
     setCompleted(36 - engine.getRemaining());
-    trackResult(heading, timeoutScoringTime, false, true);
+    trackResult(heading, CHALLENGE_TIME_LIMIT, false);
 
-    setFeedbackColor('red');
-    setShowCorrect(expected.reciprocal);
-    setShowDirection(expected.direction);
+    setFeedbackState({ correct: false, fast: false });
+    setShowFeedback(true);
 
     setTimeout(() => {
       clearFeedbackAndAdvance();
     }, FEEDBACK_HOLD_MS);
-  }, [disabled, heading, phase, clearFeedbackAndAdvance, trackResult]);
+  }, [disabled, heading, phase, stopTimer, trackResult, clearFeedbackAndAdvance]);
 
+  // Keep handleTimeoutRef updated
   useEffect(() => {
-    if (timerRunning) {
-      timeoutRef.current = setTimeout(() => {
-        handleTimeout();
-      }, CHALLENGE_TIME_LIMIT);
+    handleTimeoutRef.current = handleTimeout;
+  }, [handleTimeout]);
+
+  // Handle answer from WedgeFirstInput
+  const handleAnswer = useCallback((selectedHeading: string, wedgeId: number) => {
+    if (disabled || phase !== 'active') return;
+    stopTimer();
+    setDisabled(true);
+
+    const elapsed = Date.now() - timerStartRef.current;
+    setTimerRunning(false);
+
+    // Check if correct: selected heading must match the RECIPROCAL of the stimulus
+    const reciprocal = calculateReciprocal(heading);
+    const isCorrect = selectedHeading === reciprocal;
+    const isFast = elapsed < GREEN_THRESHOLD;
+
+    // Record result to engine
+    const engine = engineRef.current;
+    let engineTime: number;
+    if (isCorrect && isFast) {
+      engineTime = 500;
+    } else if (isCorrect) {
+      engineTime = 1500;
+    } else {
+      engineTime = 3000;
     }
-    return () => {
-      if (timeoutRef.current) {
-        clearTimeout(timeoutRef.current);
-        timeoutRef.current = null;
-      }
-    };
-  }, [timerRunning, handleTimeout]);
+    engine.recordResult(heading, engineTime, isCorrect);
+    setCompleted(36 - engine.getRemaining());
+    trackResult(heading, elapsed, isCorrect);
 
-  // Start voice recognition when isListening becomes true
-  useEffect(() => {
-    if (!isListening || phase !== 'active') return;
+    setFeedbackState({ correct: isCorrect, fast: isFast });
+    setShowFeedback(true);
 
-    const startVoice = async () => {
-      const service = getVoiceService();
-      const available = await service.isAvailable();
-      if (!available) {
-        console.warn('Voice recognition not available');
-        return;
-      }
-
-      const currentHeading = heading;
-      const expected = buildExpectedPhrase(currentHeading);
-
-      service.onPartialResult = (text) => {
-        setRecognizedText(text);
-
-        if (answerProcessedRef.current || phaseRef.current !== 'active') return;
-
-        if (processDebounceRef.current) {
-          clearTimeout(processDebounceRef.current);
-          processDebounceRef.current = null;
-        }
-
-        const normalized = normalizeSpokenText(text);
-        lastPartialTextRef.current = text;
-
-        const hasDigits = /\b(zero|one|two|three|four|five|six|seven|eight|nine)\b.*\b(zero|one|two|three|four|five|six|seven|eight|nine)\b/i.test(normalized);
-        const hasDirection = /\b(north|south|east|west)\b/i.test(normalized);
-
-        if (hasDigits && hasDirection) {
-          processDebounceRef.current = setTimeout(() => {
-            if (answerProcessedRef.current || phaseRef.current !== 'active') return;
-
-            const match = matchVoiceToHeading(currentHeading, lastPartialTextRef.current);
-
-            const sinceLast = sessionRef.current.getTimeElapsed();
-            const rawTime = sinceLast + resumeFromRef.current;
-            const scoringTime = rawTime - STT_LATENCY;
-
-            // Determine feedback based on Level 3 thresholds
-            let feedback: FeedbackState;
-            if (!match.isMatch) {
-              feedback = 'red';
-            } else if (scoringTime <= GREEN_THRESHOLD) {
-              feedback = 'green';
-            } else if (scoringTime <= SLOW_THRESHOLD) {
-              feedback = 'amber';
-            } else {
-              feedback = 'red'; // Too slow
-            }
-
-            // Map our grading to engine-compatible time
-            let engineTime: number;
-            if (feedback === 'green') {
-              engineTime = 500;
-            } else if (feedback === 'amber') {
-              engineTime = 1500;
-            } else {
-              engineTime = 3000;
-            }
-
-            answerProcessedRef.current = true;
-            setDisabled(true);
-            setIsListening(false);
-            setTimerRunning(false);
-            setFrozenTime(rawTime);
-            service.stop();
-
-            // Record result
-            const engine = engineRef.current;
-            engine.recordResult(currentHeading, engineTime, match.isMatch);
-            setCompleted(36 - engine.getRemaining());
-            trackResult(currentHeading, scoringTime, match.isMatch, false);
-
-            setFeedbackColor(feedback);
-            if (!match.isMatch || feedback === 'red') {
-              setShowCorrect(expected.reciprocal);
-              setShowDirection(expected.direction);
-            }
-
-            setTimeout(() => {
-              clearFeedbackAndAdvance();
-            }, FEEDBACK_HOLD_MS);
-          }, 300);
-        }
-      };
-
-      service.onFinalResult = (result) => {
-        if (answerProcessedRef.current || phaseRef.current !== 'active') return;
-        if (!result.text) return;
-
-        setRecognizedText(result.text);
-        const match = matchVoiceToHeading(currentHeading, result.text);
-
-        answerProcessedRef.current = true;
-        setDisabled(true);
-        setIsListening(false);
-
-        const sinceLast = sessionRef.current.getTimeElapsed();
-        const rawTime = sinceLast + resumeFromRef.current;
-        const scoringTime = rawTime - STT_LATENCY;
-        setTimerRunning(false);
-        setFrozenTime(rawTime);
-
-        // Determine feedback based on Level 3 thresholds
-        let feedback: FeedbackState;
-        if (!match.isMatch) {
-          feedback = 'red';
-        } else if (scoringTime <= GREEN_THRESHOLD) {
-          feedback = 'green';
-        } else if (scoringTime <= SLOW_THRESHOLD) {
-          feedback = 'amber';
-        } else {
-          feedback = 'red'; // Too slow
-        }
-
-        // Map our grading to engine-compatible time
-        let engineTime: number;
-        if (feedback === 'green') {
-          engineTime = 500;
-        } else if (feedback === 'amber') {
-          engineTime = 1500;
-        } else {
-          engineTime = 3000;
-        }
-
-        // Record result
-        const engine = engineRef.current;
-        engine.recordResult(currentHeading, engineTime, match.isMatch);
-        setCompleted(36 - engine.getRemaining());
-        trackResult(currentHeading, scoringTime, match.isMatch, false);
-
-        setFeedbackColor(feedback);
-        if (!match.isMatch || feedback === 'red') {
-          setShowCorrect(expected.reciprocal);
-          setShowDirection(expected.direction);
-        }
-
-        setTimeout(() => {
-          clearFeedbackAndAdvance();
-        }, FEEDBACK_HOLD_MS);
-      };
-
-      await service.start();
-    };
-
-    startVoice();
-
-    // Don't cancel on cleanup - handleTimeout will handle stopping the service
-  }, [isListening, phase, heading, clearFeedbackAndAdvance, trackResult]);
+    setTimeout(() => {
+      clearFeedbackAndAdvance();
+    }, FEEDBACK_HOLD_MS);
+  }, [disabled, heading, phase, stopTimer, trackResult, clearFeedbackAndAdvance]);
 
   const toggleSelection = useCallback((h: string) => {
     setSelectedForFocus((prev) => {
@@ -719,77 +588,61 @@ export default function Level3MasteryChallengeScreen() {
 
   // ACTIVE / COUNTDOWN
   const isCountdown = phase === 'countdown';
-  const expectedReciprocal = heading ? calculateReciprocal(heading) : '';
-  const expectedDirection = heading ? (HEADING_PACKETS[expectedReciprocal]?.direction || '') : '';
 
   return (
-    <View style={styles.container}>
+    <View style={styles.activeContainer}>
       <View style={styles.gridPositioner}>
         <ProgressGrid key={gridKey} results={resultsRef.current} />
       </View>
 
-      <View style={styles.activeInner}>
-        <View style={styles.timerArea}>
-          <CountdownTimer
-            running={timerRunning}
-            onTimeout={handleTimeout}
-            frozenTime={frozenTime}
-            duration={CHALLENGE_TIME_LIMIT}
-            resumeFrom={resumeFrom}
-            size={140}
-            strokeWidth={6}
-            greenThreshold={TIMER_GREEN_THRESHOLD}
-            amberThreshold={TIMER_AMBER_THRESHOLD}
-          >
-            {isCountdown ? (
-              <Text style={styles.getReady}>Ready</Text>
-            ) : showHeading ? (
-              <Text style={styles.headingInRing}>{heading}</Text>
-            ) : null}
-          </CountdownTimer>
-        </View>
-
-        <View style={[
-          styles.voiceDisplay,
-          feedbackColor === 'green' && styles.voiceDisplayGreen,
-          feedbackColor === 'amber' && styles.voiceDisplayAmber,
-          feedbackColor === 'red' && styles.voiceDisplayRed,
-        ]}>
-          {showCorrect ? (
-            <Text style={styles.correctAnswer}>{showCorrect} {showDirection}</Text>
-          ) : recognizedText ? (
-            <Text style={styles.recognizedText}>{recognizedText}</Text>
-          ) : null}
-        </View>
+      <View style={styles.compassWrapCentered}>
+        <WedgeFirstInput
+          heading={heading}
+          onAnswer={handleAnswer}
+          disabled={disabled || isCountdown}
+          timerProgress={timerProgress}
+          timerColor={timerColor}
+          feedbackState={feedbackState}
+          showFeedback={showFeedback}
+          centerText={isCountdown ? 'Ready' : undefined}
+          correctAnswer={heading ? `${calculateReciprocal(heading)} ${HEADING_PACKETS[calculateReciprocal(heading)]?.direction || ''}` : ''}
+        />
       </View>
 
-      <Pressable
-        style={[styles.controlBtn, { borderColor: '#ff5555', marginTop: 20 }]}
-        onPress={() => {
-          if (Object.keys(storedMasteryResults).length > 0) {
-            resultsRef.current = { ...storedMasteryResults };
-            totalMistakesRef.current = storedMistakes;
-            setElapsed(storedElapsed);
-            setPhase('complete');
-            phaseRef.current = 'complete';
-          } else {
-            setPhase('idle');
-            phaseRef.current = 'idle';
-          }
-          setIsListening(false);
-        }}
-      >
-        <Text style={[styles.controlBtnText, { color: '#ff5555' }]}>Quit</Text>
-      </Pressable>
+      <View style={styles.controlRow}>
+        <Pressable
+          style={[styles.controlBtn, styles.stopCtrl]}
+          onPress={() => {
+            stopTimer();
+            if (Object.keys(storedMasteryResults).length > 0) {
+              resultsRef.current = { ...storedMasteryResults };
+              totalMistakesRef.current = storedMistakes;
+              setElapsed(storedElapsed);
+              setPhase('complete');
+              phaseRef.current = 'complete';
+            } else {
+              setPhase('idle');
+              phaseRef.current = 'idle';
+            }
+          }}
+        >
+          <Text style={[styles.controlBtnText, styles.stopCtrlText]}>Quit</Text>
+        </Pressable>
+      </View>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0f0f23', alignItems: 'center', paddingTop: 20 },
+  activeContainer: { flex: 1, backgroundColor: '#0f0f23', alignItems: 'center', paddingTop: 20 },
+  compassWrapCentered: { marginTop: 0 },
   scrollContainer: { flex: 1, backgroundColor: '#0f0f23' },
   scrollContent: { alignItems: 'center', paddingTop: 20, paddingBottom: 40 },
-  activeInner: { alignItems: 'center', paddingTop: 12 },
+  controlRow: { flexDirection: 'row', justifyContent: 'center', gap: 12, marginTop: 32 },
+  stopCtrl: { borderColor: '#ff5555' },
+  stopCtrlText: { color: '#ff5555' },
+  resumeText: { color: '#00e676' },
   title: { fontSize: 22, color: '#00d4ff', fontWeight: '700', letterSpacing: 1, marginBottom: 8 },
   description: { fontSize: 16, color: '#aabbcc', textAlign: 'center', marginTop: 40, lineHeight: 24 },
   bestScore: { fontSize: 14, color: '#00e676', fontWeight: '600', marginTop: 16 },

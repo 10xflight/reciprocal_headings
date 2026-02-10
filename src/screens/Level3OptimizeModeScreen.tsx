@@ -3,20 +3,25 @@ import { Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useNavigation, usePreventRemove } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
-import HeadingDisplay from '../features/stimulus/HeadingDisplay';
-import CountdownTimer from '../ui/CountdownTimer';
+import WedgeFirstInput from '../ui/WedgeFirstInput';
 import { MASTER_SEQUENCE, GRID_PAIRS } from '../core/algorithms/trainingEngine';
 import { FocusDeckEngine } from '../core/algorithms/focusDeckEngine';
 import { SessionManager } from '../state/sessionManager';
 import { useStore, HeadingPerformance, MasteryHeadingResult } from '../state/store';
-import { FeedbackState, TIMING } from '../core/types';
+import { TIMING } from '../core/types';
 import { calculateReciprocal } from '../core/algorithms/reciprocal';
 import { HEADING_PACKETS } from '../core/data/headingPackets';
 
 type SessionPhase = 'dashboard' | 'countdown' | 'active' | 'paused' | 'complete';
 
 const FEEDBACK_HOLD_MS = 1200;
-const LEVEL3_LIMIT = TIMING.VERBAL_LIMIT; // 1500ms
+
+// Level 3 timing: Level 1 thresholds + 1.0s
+// Level 1: Green ≤1.0s, Amber 1.0-2.0s, Timeout >2.0s
+// Level 3: Green ≤2.0s, Amber 2.0-3.0s, Timeout >3.0s
+const GREEN_THRESHOLD = 2000;
+const SLOW_THRESHOLD = 3000;
+const LEVEL3_LIMIT = 3000;
 
 function formatDate(timestamp: number | null): string {
   if (!timestamp) return '';
@@ -119,24 +124,71 @@ export default function Level3OptimizeModeScreen() {
   const [frozenTime, setFrozenTime] = useState<number | null>(null);
   const [resumeFrom, setResumeFrom] = useState<number | null>(null);
   const resumeFromRef = useRef<number>(0);
-  const [feedbackColor, setFeedbackColor] = useState<FeedbackState | undefined>(undefined);
-  const [showCorrect, setShowCorrect] = useState<string | undefined>(undefined);
-  const [showDirection, setShowDirection] = useState<string | undefined>(undefined);
 
   const [masteredCount, setMasteredCount] = useState(0);
   const [totalReps, setTotalReps] = useState(0);
   const [gridKey, setGridKey] = useState(0);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
-  // Voice simulation state
-  const [isListening, setIsListening] = useState(false);
-  const [recognizedText, setRecognizedText] = useState('');
+  // WedgeFirstInput feedback state
+  const [feedbackState, setFeedbackState] = useState<{ correct: boolean; fast: boolean } | null>(null);
+  const [showFeedback, setShowFeedback] = useState(false);
+
+  // Timer state
+  const [timerProgress, setTimerProgress] = useState(0);
+  const [timerColor, setTimerColor] = useState('#00e676');
+  const timerStartRef = useRef<number>(0);
+  const timerIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const handleTimeoutRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (heading && phase === 'active') {
       setShowHeading(true);
     }
   }, [repKey]);
+
+  // Timer tick function
+  const startTimer = useCallback(() => {
+    timerStartRef.current = Date.now() - (resumeFromRef.current || 0);
+    const initialElapsed = resumeFromRef.current || 0;
+    const initialProgress = Math.min(initialElapsed / LEVEL3_LIMIT, 1);
+    setTimerProgress(initialProgress);
+
+    const tick = () => {
+      if (phaseRef.current !== 'active') return;
+      const elapsed = Date.now() - timerStartRef.current;
+      const progress = Math.min(elapsed / LEVEL3_LIMIT, 1);
+      setTimerProgress(progress);
+
+      if (elapsed < GREEN_THRESHOLD) {
+        setTimerColor('#00e676');
+      } else if (elapsed < SLOW_THRESHOLD) {
+        setTimerColor('#ffab00');
+      } else {
+        setTimerColor('#ff1744');
+      }
+
+      if (elapsed >= LEVEL3_LIMIT) {
+        handleTimeoutRef.current?.();
+      }
+    };
+
+    if (timerIntervalRef.current) clearInterval(timerIntervalRef.current);
+    timerIntervalRef.current = setInterval(tick, 50);
+    tick();
+  }, []);
+
+  const stopTimer = useCallback(() => {
+    if (timerIntervalRef.current) {
+      clearInterval(timerIntervalRef.current);
+      timerIntervalRef.current = null;
+    }
+  }, []);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => stopTimer();
+  }, [stopTimer]);
 
   const saveSessionData = useCallback(() => {
     if (sessionDataRef.current.length > 0) {
@@ -160,17 +212,14 @@ export default function Level3OptimizeModeScreen() {
     setPhase('countdown');
     phaseRef.current = 'countdown';
     setDisabled(false);
-    setFeedbackColor(undefined);
-    setShowCorrect(undefined);
-    setShowDirection(undefined);
+    setFeedbackState(null);
+    setShowFeedback(false);
     setShowHeading(false);
     setTimerRunning(false);
     setFrozenTime(null);
     setMasteredCount(0);
     setTotalReps(0);
     setGridKey((k) => k + 1);
-    setRecognizedText('');
-    setIsListening(false);
 
     setTimeout(() => {
       if (phaseRef.current !== 'countdown') return;
@@ -184,65 +233,68 @@ export default function Level3OptimizeModeScreen() {
       setTimerRunning(true);
       setFrozenTime(null);
       setResumeFrom(null);
-      setIsListening(true);
+      startTimer();
     }, 1000);
-  }, [weightedSequence]);
+  }, [weightedSequence, startTimer]);
 
   const stopSession = useCallback(() => {
+    stopTimer();
     setPhase('complete');
     phaseRef.current = 'complete';
     setDisabled(false);
     setTimerRunning(false);
     setFrozenTime(null);
-    setIsListening(false);
+    setShowFeedback(false);
+    setFeedbackState(null);
     saveSessionData();
-  }, [saveSessionData]);
+  }, [stopTimer, saveSessionData]);
 
   usePreventRemove(phase !== 'dashboard' && phase !== 'complete', () => {
     stopSession();
   });
 
   const pauseSession = useCallback(() => {
-    const sinceLast = sessionRef.current.getTimeElapsed();
-    const totalElapsed = sinceLast + resumeFromRef.current;
+    stopTimer();
+    const elapsed = Date.now() - timerStartRef.current;
     setPhase('paused');
     phaseRef.current = 'paused';
     setTimerRunning(false);
-    setFrozenTime(totalElapsed);
-    setIsListening(false);
-  }, []);
+    setFrozenTime(elapsed);
+  }, [stopTimer]);
 
   const resumeSession = useCallback(() => {
     setPhase('active');
     phaseRef.current = 'active';
+    setDisabled(false);
     sessionRef.current.startTimer();
-    resumeFromRef.current = frozenTime ?? 0;
-    setResumeFrom(frozenTime);
+    const savedTime = frozenTime ?? 0;
+    resumeFromRef.current = savedTime;
+    setResumeFrom(savedTime);
     setTimerRunning(true);
     setFrozenTime(null);
-    setIsListening(true);
-  }, [frozenTime]);
+    startTimer();
+  }, [frozenTime, startTimer]);
 
   const clearFeedbackAndAdvance = useCallback(() => {
     if (phaseRef.current !== 'active') return;
 
-    setFeedbackColor(undefined);
-    setShowCorrect(undefined);
-    setShowDirection(undefined);
+    setShowFeedback(false);
+    setFeedbackState(null);
     setShowHeading(false);
-    setRecognizedText('');
 
     const engine = engineRef.current;
     if (engine.isComplete()) {
+      stopTimer();
       saveSessionData();
       setPhase('complete');
       phaseRef.current = 'complete';
-      setIsListening(false);
       return;
     }
 
+    stopTimer();
     setTimerRunning(false);
-    setFrozenTime(0);
+    setTimerProgress(0);
+    setTimerColor('#00e676');
 
     setTimeout(() => {
       if (phaseRef.current !== 'active') return;
@@ -256,82 +308,70 @@ export default function Level3OptimizeModeScreen() {
       setTimerRunning(true);
       setFrozenTime(null);
       setResumeFrom(null);
-      setIsListening(true);
+      startTimer();
     }, TIMING.INTER_REP_DELAY);
-  }, [saveSessionData]);
-
-  const processAnswer = useCallback((spokenReciprocal: string, spokenDirection: string, timeMs: number) => {
-    const expectedReciprocal = calculateReciprocal(heading);
-    const expectedDirection = HEADING_PACKETS[heading]?.direction || '';
-
-    const isCorrect = spokenReciprocal === expectedReciprocal &&
-      spokenDirection.toLowerCase() === expectedDirection.toLowerCase();
-
-    const engine = engineRef.current;
-    const engineResult = engine.recordResult(heading, timeMs, isCorrect);
-
-    sessionDataRef.current.push({ heading, time: timeMs, isCorrect });
-
-    setFeedbackColor(engineResult.feedbackColor);
-    updateStats();
-
-    if (!isCorrect) {
-      setShowCorrect(expectedReciprocal);
-      setShowDirection(expectedDirection);
-    }
-
-    setTimeout(() => {
-      setShowCorrect(undefined);
-      setShowDirection(undefined);
-      clearFeedbackAndAdvance();
-    }, FEEDBACK_HOLD_MS);
-  }, [heading, updateStats, clearFeedbackAndAdvance]);
+  }, [stopTimer, startTimer, saveSessionData]);
 
   const handleTimeout = useCallback(() => {
     if (disabled || phase !== 'active') return;
+    stopTimer();
     setDisabled(true);
     setTimerRunning(false);
-    setFrozenTime(LEVEL3_LIMIT);
-    setIsListening(false);
-
-    const expectedReciprocal = calculateReciprocal(heading);
-    const expectedDirection = HEADING_PACKETS[heading]?.direction || '';
 
     const engine = engineRef.current;
-    engine.recordResult(heading, LEVEL3_LIMIT, false);
-
+    engine.recordResult(heading, 3000, false);
     sessionDataRef.current.push({ heading, time: LEVEL3_LIMIT, isCorrect: false });
 
-    setFeedbackColor('red');
-    setShowCorrect(expectedReciprocal);
-    setShowDirection(expectedDirection);
+    setFeedbackState({ correct: false, fast: false });
+    setShowFeedback(true);
     updateStats();
 
     setTimeout(() => {
-      setShowCorrect(undefined);
-      setShowDirection(undefined);
       clearFeedbackAndAdvance();
     }, FEEDBACK_HOLD_MS);
-  }, [disabled, heading, phase, updateStats, clearFeedbackAndAdvance]);
+  }, [disabled, heading, phase, stopTimer, updateStats, clearFeedbackAndAdvance]);
 
-  // Simulate voice input
-  const handleMicTap = useCallback(() => {
+  // Keep handleTimeoutRef updated
+  useEffect(() => {
+    handleTimeoutRef.current = handleTimeout;
+  }, [handleTimeout]);
+
+  // Handle answer from WedgeFirstInput
+  const handleAnswer = useCallback((selectedHeading: string, wedgeId: number) => {
     if (disabled || phase !== 'active') return;
+    stopTimer();
     setDisabled(true);
 
-    const sinceLast = sessionRef.current.getTimeElapsed();
-    const totalElapsed = sinceLast + resumeFromRef.current;
+    const elapsed = Date.now() - timerStartRef.current;
     setTimerRunning(false);
-    setFrozenTime(totalElapsed);
-    setIsListening(false);
 
-    // Simulate correct answer
-    const expectedReciprocal = calculateReciprocal(heading);
-    const expectedDirection = HEADING_PACKETS[heading]?.direction || '';
-    setRecognizedText(`${expectedReciprocal} ${expectedDirection}`);
+    // Check if correct: selected heading must match the RECIPROCAL of the stimulus
+    const reciprocal = calculateReciprocal(heading);
+    const isCorrect = selectedHeading === reciprocal;
+    const isFast = elapsed < GREEN_THRESHOLD;
 
-    processAnswer(expectedReciprocal, expectedDirection, totalElapsed);
-  }, [disabled, heading, phase, processAnswer]);
+    // Record result to engine
+    const engine = engineRef.current;
+    let engineTime: number;
+    if (isCorrect && isFast) {
+      engineTime = 500;
+    } else if (isCorrect) {
+      engineTime = 1500;
+    } else {
+      engineTime = 3000;
+    }
+    engine.recordResult(heading, engineTime, isCorrect);
+
+    sessionDataRef.current.push({ heading, time: elapsed, isCorrect });
+
+    setFeedbackState({ correct: isCorrect, fast: isFast });
+    setShowFeedback(true);
+    updateStats();
+
+    setTimeout(() => {
+      clearFeedbackAndAdvance();
+    }, FEEDBACK_HOLD_MS);
+  }, [disabled, heading, phase, stopTimer, updateStats, clearFeedbackAndAdvance]);
 
   // Dashboard view
   if (phase === 'dashboard') {
@@ -432,8 +472,6 @@ export default function Level3OptimizeModeScreen() {
   // Active / Countdown / Paused
   const isCountdown = phase === 'countdown';
   const isPaused = phase === 'paused';
-  const expectedReciprocal = heading ? calculateReciprocal(heading) : '';
-  const expectedDirection = heading ? (HEADING_PACKETS[heading]?.direction || '') : '';
 
   return (
     <View style={styles.activeContainer}>
@@ -441,93 +479,34 @@ export default function Level3OptimizeModeScreen() {
         <ProgressGrid key={gridKey} engine={engineRef.current} practiceData={practiceData} />
       </View>
 
-      <ScrollView
-        style={styles.activeScrollView}
-        contentContainerStyle={styles.activeScrollContent}
-        showsVerticalScrollIndicator={false}
-      >
-        <View style={styles.activeInner}>
-          <View style={styles.headingAreaCompact}>
-            {isCountdown ? (
-              <Text style={styles.getReady}>Get Ready...</Text>
-            ) : (
-              <>
-                {showHeading ? (
-                  <HeadingDisplay heading={heading} size="compact" />
-                ) : (
-                  <View style={styles.headingPlaceholderCompact} />
-                )}
-              </>
-            )}
-          </View>
+      <View style={styles.compassWrapCentered}>
+        <WedgeFirstInput
+          heading={heading}
+          onAnswer={handleAnswer}
+          disabled={disabled || isCountdown || isPaused}
+          timerProgress={timerProgress}
+          timerColor={timerColor}
+          feedbackState={feedbackState}
+          showFeedback={showFeedback}
+          centerText={isCountdown ? 'Ready' : undefined}
+          correctAnswer={heading ? `${calculateReciprocal(heading)} ${HEADING_PACKETS[calculateReciprocal(heading)]?.direction || ''}` : ''}
+        />
+      </View>
 
-          <View style={styles.voiceArea}>
-            <View style={styles.timerRow}>
-              <CountdownTimer
-                running={timerRunning}
-                onTimeout={handleTimeout}
-                frozenTime={frozenTime}
-                duration={LEVEL3_LIMIT}
-                resumeFrom={resumeFrom}
-              />
-            </View>
-
-            <View style={[
-              styles.voiceDisplay,
-              feedbackColor === 'green' && styles.voiceDisplayGreen,
-              feedbackColor === 'amber' && styles.voiceDisplayAmber,
-              feedbackColor === 'red' && styles.voiceDisplayRed,
-            ]}>
-              {showCorrect ? (
-                <View style={styles.correctAnswerDisplay}>
-                  <Text style={styles.correctReciprocal}>{showCorrect}</Text>
-                  <Text style={styles.correctDirection}>{showDirection}</Text>
-                </View>
-              ) : recognizedText ? (
-                <Text style={styles.recognizedText}>{recognizedText}</Text>
-              ) : (
-                <Text style={styles.voicePlaceholder}>
-                  {isListening ? 'Listening...' : 'Tap mic to speak'}
-                </Text>
-              )}
-            </View>
-
-            <Pressable
-              style={[
-                styles.micButton,
-                isListening && styles.micButtonActive,
-                (disabled || isCountdown || isPaused) && styles.micButtonDisabled,
-              ]}
-              onPress={handleMicTap}
-              disabled={disabled || isCountdown || isPaused}
-            >
-              <Text style={styles.micIcon}>🎤</Text>
-              <Text style={styles.micLabel}>
-                {isListening ? 'Listening' : 'Tap to Speak'}
-              </Text>
-            </Pressable>
-
-            <Text style={styles.expectedFormat}>
-              Say: "{expectedReciprocal} {expectedDirection}"
-            </Text>
-          </View>
-
-          <View style={styles.controlRow}>
-            {isPaused ? (
-              <Pressable style={styles.controlBtn} onPress={resumeSession}>
-                <Text style={[styles.controlBtnText, styles.resumeText]}>Resume</Text>
-              </Pressable>
-            ) : (
-              <Pressable style={styles.controlBtn} onPress={pauseSession}>
-                <Text style={styles.controlBtnText}>Pause</Text>
-              </Pressable>
-            )}
-            <Pressable style={[styles.controlBtn, styles.stopCtrl]} onPress={stopSession}>
-              <Text style={[styles.controlBtnText, styles.stopCtrlText]}>Stop</Text>
-            </Pressable>
-          </View>
-        </View>
-      </ScrollView>
+      <View style={styles.controlRow}>
+        {isPaused ? (
+          <Pressable style={styles.controlBtn} onPress={resumeSession}>
+            <Text style={[styles.controlBtnText, styles.resumeText]}>Resume</Text>
+          </Pressable>
+        ) : (
+          <Pressable style={styles.controlBtn} onPress={pauseSession}>
+            <Text style={styles.controlBtnText}>Pause</Text>
+          </Pressable>
+        )}
+        <Pressable style={[styles.controlBtn, styles.stopCtrl]} onPress={stopSession}>
+          <Text style={[styles.controlBtnText, styles.stopCtrlText]}>Stop</Text>
+        </Pressable>
+      </View>
 
       {isPaused && (
         <View style={styles.pausedBadge} pointerEvents="none">
@@ -540,26 +519,22 @@ export default function Level3OptimizeModeScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0f0f23', alignItems: 'center', paddingTop: 20 },
-  activeContainer: { flex: 1, backgroundColor: '#0f0f23' },
-  activeScrollView: { flex: 1 },
-  activeScrollContent: { flexGrow: 1, paddingBottom: 40 },
-  activeInner: { flex: 1, alignItems: 'center', paddingTop: 12 },
+  activeContainer: { flex: 1, backgroundColor: '#0f0f23', alignItems: 'center', paddingTop: 20 },
+  compassWrapCentered: { marginTop: 0 },
   title: { fontSize: 22, color: '#00d4ff', fontWeight: '700', letterSpacing: 1, marginBottom: 2 },
   subtitle: { fontSize: 13, color: '#667788', marginBottom: 16 },
   dashboardGrid: { marginTop: 20, marginBottom: 12, gap: 4 },
   dashboardGridRow: { flexDirection: 'row', gap: 4 },
   dashboardGridCell: { width: 48, height: 40, borderWidth: 1, borderRadius: 4, alignItems: 'center', justifyContent: 'center' },
   dashboardGridText: { fontSize: 13, fontWeight: '700', fontVariant: ['tabular-nums'] },
-  headingAreaCompact: { height: 100, width: '100%', justifyContent: 'center', alignItems: 'center', position: 'relative' },
-  headingPlaceholderCompact: { height: 100 },
-  getReady: { fontSize: 24, color: '#ffab00', fontWeight: '700' },
+  timerArea: { marginBottom: 20 },
+  headingInRing: { fontSize: 48, fontWeight: '700', color: '#00d4ff', fontVariant: ['tabular-nums'] },
+  getReady: { fontSize: 18, color: '#ffab00', fontWeight: '700' },
   gridContainer: { gap: 1 },
   gridRow: { flexDirection: 'row', gap: 1 },
   gridCell: { width: 28, height: 20, borderWidth: 1, borderRadius: 2, justifyContent: 'center', alignItems: 'center' },
   gridCellText: { fontSize: 8, fontWeight: '700', fontVariant: ['tabular-nums'] },
   gridPositioner: { position: 'absolute', left: 12, top: 12, zIndex: 10 },
-  voiceArea: { alignItems: 'center', marginTop: 4, width: '100%' },
-  timerRow: { marginBottom: 16 },
   voiceDisplay: {
     width: '80%',
     maxWidth: 300,
@@ -576,10 +551,7 @@ const styles = StyleSheet.create({
   voiceDisplayAmber: { borderColor: '#ffab00', backgroundColor: 'rgba(255,171,0,0.1)' },
   voiceDisplayRed: { borderColor: '#ff5555', backgroundColor: 'rgba(255,85,85,0.1)' },
   recognizedText: { fontSize: 24, fontWeight: '700', color: '#ffffff' },
-  voicePlaceholder: { fontSize: 16, color: '#667788' },
-  correctAnswerDisplay: { alignItems: 'center' },
-  correctReciprocal: { fontSize: 28, fontWeight: '700', color: '#00e676' },
-  correctDirection: { fontSize: 16, color: '#00e676', marginTop: 4 },
+  correctAnswer: { fontSize: 24, fontWeight: '700', color: '#00e676' },
   micButton: {
     width: 80,
     height: 80,
@@ -591,7 +563,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
   },
-  micButtonActive: { backgroundColor: 'rgba(255,149,0,0.2)', borderColor: '#ffab00' },
+  micButtonActive: { backgroundColor: 'rgba(0,212,255,0.2)', borderColor: '#00d4ff' },
   micButtonDisabled: { opacity: 0.4, borderColor: '#3a4a5a' },
   micIcon: { fontSize: 32 },
   micLabel: { fontSize: 10, color: '#aabbcc', marginTop: 2 },
@@ -605,7 +577,7 @@ const styles = StyleSheet.create({
   pausedBadge: { position: 'absolute', top: '45%', alignSelf: 'center', backgroundColor: 'rgba(15, 15, 35, 0.85)', paddingHorizontal: 24, paddingVertical: 10, borderRadius: 8, zIndex: 90 },
   pausedText: { fontSize: 24, fontWeight: '700', color: '#ffab00', letterSpacing: 4 },
   primaryBtn: { marginTop: 24, backgroundColor: '#00d4ff', paddingHorizontal: 36, paddingVertical: 12, borderRadius: 8 },
-  primaryBtnText: { fontSize: 18, fontWeight: '700', color: '#ffffff' },
+  primaryBtnText: { fontSize: 18, fontWeight: '700', color: '#0f0f23' },
   secondaryBtn: { marginTop: 12, borderWidth: 1, borderColor: '#3a4a5a', paddingHorizontal: 28, paddingVertical: 10, borderRadius: 8 },
   secondaryBtnText: { color: '#aabbcc', fontSize: 15, fontWeight: '600' },
   statsLine: { fontSize: 16, color: '#aabbcc', marginTop: 8 },
