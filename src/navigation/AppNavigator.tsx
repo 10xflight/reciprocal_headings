@@ -106,24 +106,21 @@ function HeaderRight({ showHome = true }: { showHome?: boolean }) {
   );
 }
 
-// Breadcrumb title component
+// Breadcrumb title component - just returns Text, navigator handles positioning
 function BreadcrumbTitle({ path }: { path: string[] }) {
   return (
-    <View style={styles.breadcrumbContainer}>
-      <Text style={styles.breadcrumbText} numberOfLines={1}>
-        {path.join(' › ')}
-      </Text>
-    </View>
+    <Text style={styles.breadcrumbText} numberOfLines={1}>
+      {path.join(' › ')}
+    </Text>
   );
 }
 
 const styles = StyleSheet.create({
   backBtn: { paddingHorizontal: 12, paddingVertical: 8 },
-  backArrow: { color: '#fff', fontSize: 28, fontWeight: '300' },
+  backArrow: { color: '#fff', fontSize: 28, fontWeight: '300', lineHeight: 28 },
   iconBtn: { paddingHorizontal: 10, paddingVertical: 8 },
   iconText: { color: '#fff', fontSize: 20 },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  breadcrumbContainer: { flex: 1, alignItems: 'center' },
   breadcrumbText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 });
 
