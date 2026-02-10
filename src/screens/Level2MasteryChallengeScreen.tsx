@@ -4,7 +4,6 @@ import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { RootStackParamList } from '../navigation/AppNavigator';
 import Numpad from '../features/numpad/Numpad';
-import HeadingDisplay from '../features/stimulus/HeadingDisplay';
 import CountdownTimer from '../ui/CountdownTimer';
 import { MasteryChallengeEngine, MASTER_SEQUENCE, GRID_PAIRS } from '../core/algorithms/trainingEngine';
 import { SessionManager } from '../state/sessionManager';
@@ -123,7 +122,7 @@ export default function Level2MasteryChallengeScreen() {
 
   const hasStoredResults = Object.keys(storedMasteryResults).length > 0;
 
-  const engineRef = useRef<MasteryChallengeEngine>(new MasteryChallengeEngine());
+  const engineRef = useRef<MasteryChallengeEngine>(new MasteryChallengeEngine(CHALLENGE_TIME_LIMIT));
   const sessionRef = useRef<SessionManager>(new SessionManager(engineRef.current));
   const resultsRef = useRef<Record<string, MasteryHeadingResult>>(hasStoredResults ? { ...storedMasteryResults } : {});
   const totalMistakesRef = useRef(hasStoredResults ? storedMistakes : 0);
@@ -195,7 +194,7 @@ export default function Level2MasteryChallengeScreen() {
 
   const startChallenge = useCallback(() => {
     previousBestRef.current = existingBest;
-    engineRef.current = new MasteryChallengeEngine();
+    engineRef.current = new MasteryChallengeEngine(CHALLENGE_TIME_LIMIT);
     sessionRef.current = new SessionManager(engineRef.current);
     resultsRef.current = {};
     totalMistakesRef.current = 0;
@@ -472,7 +471,7 @@ export default function Level2MasteryChallengeScreen() {
                 const status = r?.status || 'gray';
                 const isSelected = selectedForFocus.has(h);
                 const color = isSelected ? '#00d4ff' : status === 'green' ? '#00e676' : status === 'amber' ? '#ffab00' : status === 'red' ? '#ff5555' : '#556677';
-                const bgColor = isSelected ? 'rgba(170,102,255,0.15)' : status === 'green' ? 'rgba(0,230,118,0.12)' : status === 'amber' ? 'rgba(255,171,0,0.08)' : status === 'red' ? 'rgba(255,85,85,0.08)' : 'transparent';
+                const bgColor = isSelected ? 'rgba(0,212,255,0.15)' : status === 'green' ? 'rgba(0,230,118,0.12)' : status === 'amber' ? 'rgba(255,171,0,0.08)' : status === 'red' ? 'rgba(255,85,85,0.08)' : 'transparent';
 
                 return (
                   <Pressable
@@ -592,30 +591,25 @@ export default function Level2MasteryChallengeScreen() {
         showsVerticalScrollIndicator={false}
       >
         <View style={styles.activeInner}>
-          <View style={styles.headingAreaCompact}>
-            {isCountdown ? (
-              <Text style={styles.getReady}>Get Ready...</Text>
-            ) : (
-              <>
-                {showHeading ? (
-                  <HeadingDisplay heading={heading} size="compact" />
-                ) : (
-                  <View style={styles.headingPlaceholderCompact} />
-                )}
-              </>
-            )}
+          <View style={styles.timerArea}>
+            <CountdownTimer
+              running={timerRunning}
+              onTimeout={handleTimeout}
+              frozenTime={frozenTime}
+              duration={CHALLENGE_TIME_LIMIT}
+              resumeFrom={resumeFrom}
+              size={140}
+              strokeWidth={6}
+            >
+              {isCountdown ? (
+                <Text style={styles.getReady}>Ready</Text>
+              ) : showHeading ? (
+                <Text style={styles.headingInRing}>{heading}</Text>
+              ) : null}
+            </CountdownTimer>
           </View>
 
           <View style={styles.numpadArea}>
-            <View style={styles.timerRow}>
-              <CountdownTimer
-                running={timerRunning}
-                onTimeout={handleTimeout}
-                frozenTime={frozenTime}
-                duration={CHALLENGE_TIME_LIMIT}
-                resumeFrom={resumeFrom}
-              />
-            </View>
             <Numpad
               onDigit={handleDigit}
               onClear={handleClear}
@@ -659,16 +653,15 @@ const styles = StyleSheet.create({
   scrollContent: { alignItems: 'center', paddingTop: 20, paddingBottom: 40 },
   title: { fontSize: 22, color: '#00d4ff', fontWeight: '700', letterSpacing: 1, marginBottom: 8 },
   description: { fontSize: 16, color: '#aabbcc', textAlign: 'center', marginTop: 40, lineHeight: 24 },
-  headingAreaCompact: { height: 100, width: '100%', justifyContent: 'center', alignItems: 'center', position: 'relative' },
-  headingPlaceholderCompact: { height: 100 },
-  getReady: { fontSize: 24, color: '#ffab00', fontWeight: '700' },
+  timerArea: { marginBottom: 20 },
+  headingInRing: { fontSize: 48, fontWeight: '700', color: '#00d4ff', fontVariant: ['tabular-nums'] },
+  getReady: { fontSize: 18, color: '#ffab00', fontWeight: '700' },
   gridContainer: { gap: 1 },
   gridRow: { flexDirection: 'row', gap: 1 },
   gridCell: { width: 28, height: 20, borderWidth: 1, borderRadius: 2, justifyContent: 'center', alignItems: 'center' },
   gridCellText: { fontSize: 8, fontWeight: '700', fontVariant: ['tabular-nums'] },
   gridPositioner: { position: 'absolute', left: 12, top: 12, zIndex: 10 },
-  numpadArea: { alignItems: 'center', marginTop: 4 },
-  timerRow: { marginBottom: 8 },
+  numpadArea: { alignItems: 'center' },
   newBest: { fontSize: 18, color: '#ffab00', fontWeight: '700', marginBottom: 8 },
   scoreLine: { fontSize: 24, color: '#00e676', fontWeight: '700', marginTop: 8 },
   scoreBreakdown: { fontSize: 13, color: '#aabbcc', marginBottom: 8 },
@@ -693,7 +686,7 @@ const styles = StyleSheet.create({
   acceptBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#00d4ff', marginLeft: 10 },
   acceptBtnText: { color: '#00d4ff', fontSize: 13, fontWeight: '600' },
   primaryBtn: { marginTop: 24, backgroundColor: '#00d4ff', paddingHorizontal: 36, paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
-  primaryBtnText: { fontSize: 18, fontWeight: '700', color: '#ffffff' },
+  primaryBtnText: { fontSize: 18, fontWeight: '700', color: '#0f0f23' },
   primaryBtnHint: { fontSize: 11, color: '#ffffff', opacity: 0.6, marginTop: 2 },
   btnDisabled: { opacity: 0.4 },
   secondaryBtn: { marginTop: 12, borderWidth: 1, borderColor: '#3a4a5a', paddingHorizontal: 28, paddingVertical: 10, borderRadius: 8 },

@@ -294,9 +294,11 @@ export interface ChallengeResultOutput {
 export class MasteryChallengeEngine {
   private queue: string[];
   private firstAttempt: Record<string, boolean> = {};
+  private timeLimit: number;
 
-  constructor() {
+  constructor(timeLimit: number = 1200) {
     this.queue = shuffle([...MASTER_SEQUENCE]);
+    this.timeLimit = timeLimit;
   }
 
   drawNext(): string {
@@ -308,13 +310,13 @@ export class MasteryChallengeEngine {
 
     // Track first attempt per heading
     if (!(headingId in this.firstAttempt)) {
-      this.firstAttempt[headingId] = isCorrect && timeMs < 1200;
+      this.firstAttempt[headingId] = isCorrect && timeMs < this.timeLimit;
     }
 
     let feedbackColor: FeedbackColor;
     let removed = false;
 
-    if (isCorrect && timeMs <= 1200) {
+    if (isCorrect && timeMs <= this.timeLimit) {
       feedbackColor = 'green';
       removed = true; // already shifted out
     } else {

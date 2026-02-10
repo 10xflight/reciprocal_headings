@@ -11,12 +11,22 @@ import { useStore, MasteryHeadingResult } from '../state/store';
 import { FeedbackState } from '../core/types';
 import { calculateReciprocal } from '../core/algorithms/reciprocal';
 import { HEADING_PACKETS } from '../core/data/headingPackets';
+import { getVoiceService } from '../features/voice/getVoiceService';
+import { matchVoiceToHeading, normalizeSpokenText, buildExpectedPhrase } from '../features/voice/ResponseParser';
 
 type Phase = 'idle' | 'countdown' | 'active' | 'complete';
 
 const FEEDBACK_HOLD_MS = 1200;
-const CHALLENGE_TIME_LIMIT = 1700; // 1500 + 200 buffer for Level 3
+// Timeout at 3500ms raw time = 3000ms scoring time (after 500ms STT adjustment)
+const CHALLENGE_TIME_LIMIT = 3500;
 const INTER_REP_DELAY = 1000;
+
+// Level 3 grading thresholds
+const STT_LATENCY = 500;
+const GREEN_THRESHOLD = 2200;
+const SLOW_THRESHOLD = 3000;
+const TIMER_GREEN_THRESHOLD = GREEN_THRESHOLD + STT_LATENCY;
+const TIMER_AMBER_THRESHOLD = SLOW_THRESHOLD + STT_LATENCY;
 
 function formatTime(ms: number): string {
   const totalSec = Math.floor(ms / 1000);
@@ -111,7 +121,7 @@ export default function Level3MasteryChallengeScreen() {
 
   const hasStoredResults = Object.keys(storedMasteryResults).length > 0;
 
-  const engineRef = useRef<MasteryChallengeEngine>(new MasteryChallengeEngine());
+  const engineRef = useRef<MasteryChallengeEngine>(new MasteryChallengeEngine(CHALLENGE_TIME_LIMIT));
   const sessionRef = useRef<SessionManager>(new SessionManager(engineRef.current));
   const resultsRef = useRef<Record<string, MasteryHeadingResult>>(hasStoredResults ? { ...storedMasteryResults } : {});
   const totalMistakesRef = useRef(hasStoredResults ? storedMistakes : 0);
@@ -142,9 +152,12 @@ export default function Level3MasteryChallengeScreen() {
   const [practiceDataSaved, setPracticeDataSaved] = useState(false);
   const [showResetConfirm, setShowResetConfirm] = useState(false);
 
-  // Voice simulation state
+  // Voice recognition state
   const [isListening, setIsListening] = useState(false);
   const [recognizedText, setRecognizedText] = useState('');
+  const answerProcessedRef = useRef(false);
+  const processDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastPartialTextRef = useRef('');
 
   useEffect(() => {
     if (phase === 'active') {
@@ -158,18 +171,22 @@ export default function Level3MasteryChallengeScreen() {
     }
   }, [repKey]);
 
-  const trackResult = useCallback((h: string, timeMs: number, isCorrect: boolean, isTimeout: boolean) => {
-    responseTimeSumRef.current += timeMs;
+  const trackResult = useCallback((h: string, scoringTime: number, isCorrect: boolean, isTimeout: boolean) => {
+    responseTimeSumRef.current += scoringTime;
     totalResponsesRef.current++;
 
-    const isGreen = isCorrect && timeMs <= CHALLENGE_TIME_LIMIT;
-    const isWrong = !isCorrect && !isTimeout;
+    // Determine status based on Level 3 thresholds (2.2s/3.0s)
+    // scoringTime is already STT-adjusted
+    const isGreen = isCorrect && scoringTime <= GREEN_THRESHOLD;
+    const isAmber = isCorrect && scoringTime > GREEN_THRESHOLD && scoringTime <= SLOW_THRESHOLD;
+    const isWrong = !isCorrect;
 
     const existing = resultsRef.current[h];
     if (!existing) {
       const status: 'green' | 'amber' | 'red' = isWrong ? 'red' : isGreen ? 'green' : 'amber';
-      resultsRef.current[h] = { status, time: timeMs, mistakes: isCorrect ? 0 : 1 };
+      resultsRef.current[h] = { status, time: scoringTime, mistakes: isCorrect ? 0 : 1 };
     } else {
+      // Upgrade status on subsequent attempts (worst status wins)
       if (isWrong && existing.status !== 'red') {
         existing.status = 'red';
       } else if (!isGreen && existing.status === 'green') {
@@ -184,7 +201,7 @@ export default function Level3MasteryChallengeScreen() {
   }, []);
 
   const startChallenge = useCallback(() => {
-    engineRef.current = new MasteryChallengeEngine();
+    engineRef.current = new MasteryChallengeEngine(CHALLENGE_TIME_LIMIT);
     sessionRef.current = new SessionManager(engineRef.current);
     resultsRef.current = {};
     totalMistakesRef.current = 0;
@@ -219,6 +236,7 @@ export default function Level3MasteryChallengeScreen() {
       setFrozenTime(null);
       setResumeFrom(null);
       setIsListening(true);
+      answerProcessedRef.current = false;
     }, 1000);
   }, []);
 
@@ -270,26 +288,56 @@ export default function Level3MasteryChallengeScreen() {
       setFrozenTime(null);
       setResumeFrom(null);
       setIsListening(true);
+      answerProcessedRef.current = false;
     }, INTER_REP_DELAY);
   }, [saveBest, saveMasteryResults, existingBest]);
 
-  const handleTimeout = useCallback(() => {
-    if (disabled || phase !== 'active') return;
+  const handleTimeout = useCallback(async () => {
+    if (answerProcessedRef.current || disabled || phase !== 'active') return;
+    answerProcessedRef.current = true;
     setDisabled(true);
     setTimerRunning(false);
     setFrozenTime(CHALLENGE_TIME_LIMIT);
     setIsListening(false);
 
-    const engine = engineRef.current;
-    engine.recordResult(heading, CHALLENGE_TIME_LIMIT, false);
-    setCompleted(36 - engine.getRemaining());
-    trackResult(heading, CHALLENGE_TIME_LIMIT, false, true);
+    // Stop voice recognition and try to get any result
+    const service = getVoiceService();
+    const result = await service.stop();
 
-    const expectedReciprocal = calculateReciprocal(heading);
-    const expectedDirection = HEADING_PACKETS[heading]?.direction || '';
+    const expected = buildExpectedPhrase(heading);
+    const timeoutScoringTime = CHALLENGE_TIME_LIMIT - STT_LATENCY;
+    const timeoutEngineTime = 3000; // Always red for timeout
+
+    // Check if we got a valid answer even though time ran out
+    if (result && result.text) {
+      setRecognizedText(result.text);
+      const match = matchVoiceToHeading(heading, result.text);
+
+      const engine = engineRef.current;
+      engine.recordResult(heading, timeoutEngineTime, match.isMatch);
+      setCompleted(36 - engine.getRemaining());
+      trackResult(heading, timeoutScoringTime, match.isMatch, true);
+
+      // Timeout means > 3.0s scoring time, so red if correct (too slow) or wrong
+      setFeedbackColor('red');
+      setShowCorrect(expected.reciprocal);
+      setShowDirection(expected.direction);
+
+      setTimeout(() => {
+        clearFeedbackAndAdvance();
+      }, FEEDBACK_HOLD_MS);
+      return;
+    }
+
+    // No valid answer - mark as failed
+    const engine = engineRef.current;
+    engine.recordResult(heading, timeoutEngineTime, false);
+    setCompleted(36 - engine.getRemaining());
+    trackResult(heading, timeoutScoringTime, false, true);
+
     setFeedbackColor('red');
-    setShowCorrect(expectedReciprocal);
-    setShowDirection(expectedDirection);
+    setShowCorrect(expected.reciprocal);
+    setShowDirection(expected.direction);
 
     setTimeout(() => {
       clearFeedbackAndAdvance();
@@ -310,33 +358,158 @@ export default function Level3MasteryChallengeScreen() {
     };
   }, [timerRunning, handleTimeout]);
 
-  // Simulate voice input
-  const handleMicTap = useCallback(() => {
-    if (disabled || phase !== 'active') return;
-    setDisabled(true);
+  // Start voice recognition when isListening becomes true
+  useEffect(() => {
+    if (!isListening || phase !== 'active') return;
 
-    const sinceLast = sessionRef.current.getTimeElapsed();
-    const totalElapsed = sinceLast + resumeFromRef.current;
-    setTimerRunning(false);
-    setFrozenTime(totalElapsed);
-    setIsListening(false);
+    const startVoice = async () => {
+      const service = getVoiceService();
+      const available = await service.isAvailable();
+      if (!available) {
+        console.warn('Voice recognition not available');
+        return;
+      }
 
-    const expectedReciprocal = calculateReciprocal(heading);
-    const expectedDirection = HEADING_PACKETS[heading]?.direction || '';
-    setRecognizedText(`${expectedReciprocal} ${expectedDirection}`);
+      const currentHeading = heading;
+      const expected = buildExpectedPhrase(currentHeading);
 
-    const isCorrect = true; // Simulated correct answer
-    const engine = engineRef.current;
-    const result = engine.recordResult(heading, totalElapsed, isCorrect);
-    setCompleted(36 - engine.getRemaining());
-    trackResult(heading, totalElapsed, isCorrect, false);
+      service.onPartialResult = (text) => {
+        setRecognizedText(text);
 
-    setFeedbackColor(result.feedbackColor);
+        if (answerProcessedRef.current || phaseRef.current !== 'active') return;
 
-    setTimeout(() => {
-      clearFeedbackAndAdvance();
-    }, FEEDBACK_HOLD_MS);
-  }, [disabled, heading, phase, clearFeedbackAndAdvance, trackResult]);
+        if (processDebounceRef.current) {
+          clearTimeout(processDebounceRef.current);
+          processDebounceRef.current = null;
+        }
+
+        const normalized = normalizeSpokenText(text);
+        lastPartialTextRef.current = text;
+
+        const hasDigits = /\b(zero|one|two|three|four|five|six|seven|eight|nine)\b.*\b(zero|one|two|three|four|five|six|seven|eight|nine)\b/i.test(normalized);
+        const hasDirection = /\b(north|south|east|west)\b/i.test(normalized);
+
+        if (hasDigits && hasDirection) {
+          processDebounceRef.current = setTimeout(() => {
+            if (answerProcessedRef.current || phaseRef.current !== 'active') return;
+
+            const match = matchVoiceToHeading(currentHeading, lastPartialTextRef.current);
+
+            const sinceLast = sessionRef.current.getTimeElapsed();
+            const rawTime = sinceLast + resumeFromRef.current;
+            const scoringTime = rawTime - STT_LATENCY;
+
+            // Determine feedback based on Level 3 thresholds
+            let feedback: FeedbackState;
+            if (!match.isMatch) {
+              feedback = 'red';
+            } else if (scoringTime <= GREEN_THRESHOLD) {
+              feedback = 'green';
+            } else if (scoringTime <= SLOW_THRESHOLD) {
+              feedback = 'amber';
+            } else {
+              feedback = 'red'; // Too slow
+            }
+
+            // Map our grading to engine-compatible time
+            let engineTime: number;
+            if (feedback === 'green') {
+              engineTime = 500;
+            } else if (feedback === 'amber') {
+              engineTime = 1500;
+            } else {
+              engineTime = 3000;
+            }
+
+            answerProcessedRef.current = true;
+            setDisabled(true);
+            setIsListening(false);
+            setTimerRunning(false);
+            setFrozenTime(rawTime);
+            service.stop();
+
+            // Record result
+            const engine = engineRef.current;
+            engine.recordResult(currentHeading, engineTime, match.isMatch);
+            setCompleted(36 - engine.getRemaining());
+            trackResult(currentHeading, scoringTime, match.isMatch, false);
+
+            setFeedbackColor(feedback);
+            if (!match.isMatch || feedback === 'red') {
+              setShowCorrect(expected.reciprocal);
+              setShowDirection(expected.direction);
+            }
+
+            setTimeout(() => {
+              clearFeedbackAndAdvance();
+            }, FEEDBACK_HOLD_MS);
+          }, 300);
+        }
+      };
+
+      service.onFinalResult = (result) => {
+        if (answerProcessedRef.current || phaseRef.current !== 'active') return;
+        if (!result.text) return;
+
+        setRecognizedText(result.text);
+        const match = matchVoiceToHeading(currentHeading, result.text);
+
+        answerProcessedRef.current = true;
+        setDisabled(true);
+        setIsListening(false);
+
+        const sinceLast = sessionRef.current.getTimeElapsed();
+        const rawTime = sinceLast + resumeFromRef.current;
+        const scoringTime = rawTime - STT_LATENCY;
+        setTimerRunning(false);
+        setFrozenTime(rawTime);
+
+        // Determine feedback based on Level 3 thresholds
+        let feedback: FeedbackState;
+        if (!match.isMatch) {
+          feedback = 'red';
+        } else if (scoringTime <= GREEN_THRESHOLD) {
+          feedback = 'green';
+        } else if (scoringTime <= SLOW_THRESHOLD) {
+          feedback = 'amber';
+        } else {
+          feedback = 'red'; // Too slow
+        }
+
+        // Map our grading to engine-compatible time
+        let engineTime: number;
+        if (feedback === 'green') {
+          engineTime = 500;
+        } else if (feedback === 'amber') {
+          engineTime = 1500;
+        } else {
+          engineTime = 3000;
+        }
+
+        // Record result
+        const engine = engineRef.current;
+        engine.recordResult(currentHeading, engineTime, match.isMatch);
+        setCompleted(36 - engine.getRemaining());
+        trackResult(currentHeading, scoringTime, match.isMatch, false);
+
+        setFeedbackColor(feedback);
+        if (!match.isMatch || feedback === 'red') {
+          setShowCorrect(expected.reciprocal);
+          setShowDirection(expected.direction);
+        }
+
+        setTimeout(() => {
+          clearFeedbackAndAdvance();
+        }, FEEDBACK_HOLD_MS);
+      };
+
+      await service.start();
+    };
+
+    startVoice();
+
+    // Don't cancel on cleanup - handleTimeout will handle stopping the service
+  }, [isListening, phase, heading, clearFeedbackAndAdvance, trackResult]);
 
   const toggleSelection = useCallback((h: string) => {
     setSelectedForFocus((prev) => {
@@ -438,8 +611,8 @@ export default function Level3MasteryChallengeScreen() {
                 const r = results[h];
                 const status = r?.status || 'gray';
                 const isSelected = selectedForFocus.has(h);
-                const color = isSelected ? '#ff9500' : status === 'green' ? '#00e676' : status === 'amber' ? '#ffab00' : status === 'red' ? '#ff5555' : '#556677';
-                const bgColor = isSelected ? 'rgba(255,149,0,0.15)' : status === 'green' ? 'rgba(0,230,118,0.12)' : status === 'amber' ? 'rgba(255,171,0,0.08)' : status === 'red' ? 'rgba(255,85,85,0.08)' : 'transparent';
+                const color = isSelected ? '#00d4ff' : status === 'green' ? '#00e676' : status === 'amber' ? '#ffab00' : status === 'red' ? '#ff5555' : '#556677';
+                const bgColor = isSelected ? 'rgba(0,212,255,0.15)' : status === 'green' ? 'rgba(0,230,118,0.12)' : status === 'amber' ? 'rgba(255,171,0,0.08)' : status === 'red' ? 'rgba(255,85,85,0.08)' : 'transparent';
 
                 return (
                   <Pressable
@@ -547,7 +720,7 @@ export default function Level3MasteryChallengeScreen() {
   // ACTIVE / COUNTDOWN
   const isCountdown = phase === 'countdown';
   const expectedReciprocal = heading ? calculateReciprocal(heading) : '';
-  const expectedDirection = heading ? (HEADING_PACKETS[heading]?.direction || '') : '';
+  const expectedDirection = heading ? (HEADING_PACKETS[expectedReciprocal]?.direction || '') : '';
 
   return (
     <View style={styles.container}>
@@ -556,63 +729,37 @@ export default function Level3MasteryChallengeScreen() {
       </View>
 
       <View style={styles.activeInner}>
-        <View style={styles.headingAreaCompact}>
-          {isCountdown ? (
-            <Text style={styles.getReady}>Ready</Text>
-          ) : showHeading ? (
-            <HeadingDisplay heading={heading} size="compact" />
-          ) : null}
+        <View style={styles.timerArea}>
+          <CountdownTimer
+            running={timerRunning}
+            onTimeout={handleTimeout}
+            frozenTime={frozenTime}
+            duration={CHALLENGE_TIME_LIMIT}
+            resumeFrom={resumeFrom}
+            size={140}
+            strokeWidth={6}
+            greenThreshold={TIMER_GREEN_THRESHOLD}
+            amberThreshold={TIMER_AMBER_THRESHOLD}
+          >
+            {isCountdown ? (
+              <Text style={styles.getReady}>Ready</Text>
+            ) : showHeading ? (
+              <Text style={styles.headingInRing}>{heading}</Text>
+            ) : null}
+          </CountdownTimer>
         </View>
 
-        <View style={styles.voiceArea}>
-          <View style={styles.timerRow}>
-            <CountdownTimer
-              running={timerRunning}
-              onTimeout={handleTimeout}
-              frozenTime={frozenTime}
-              duration={CHALLENGE_TIME_LIMIT}
-              resumeFrom={resumeFrom}
-            />
-          </View>
-
-          <View style={[
-            styles.voiceDisplay,
-            feedbackColor === 'green' && styles.voiceDisplayGreen,
-            feedbackColor === 'amber' && styles.voiceDisplayAmber,
-            feedbackColor === 'red' && styles.voiceDisplayRed,
-          ]}>
-            {showCorrect ? (
-              <View style={styles.correctAnswerDisplay}>
-                <Text style={styles.correctReciprocal}>{showCorrect}</Text>
-                <Text style={styles.correctDirection}>{showDirection}</Text>
-              </View>
-            ) : recognizedText ? (
-              <Text style={styles.recognizedText}>{recognizedText}</Text>
-            ) : (
-              <Text style={styles.voicePlaceholder}>
-                {isListening ? 'Listening...' : 'Tap mic to speak'}
-              </Text>
-            )}
-          </View>
-
-          <Pressable
-            style={[
-              styles.micButton,
-              isListening && styles.micButtonActive,
-              (disabled || isCountdown) && styles.micButtonDisabled,
-            ]}
-            onPress={handleMicTap}
-            disabled={disabled || isCountdown}
-          >
-            <Text style={styles.micIcon}>🎤</Text>
-            <Text style={styles.micLabel}>
-              {isListening ? 'Listening' : 'Tap to Speak'}
-            </Text>
-          </Pressable>
-
-          <Text style={styles.expectedFormat}>
-            Say: "{expectedReciprocal} {expectedDirection}"
-          </Text>
+        <View style={[
+          styles.voiceDisplay,
+          feedbackColor === 'green' && styles.voiceDisplayGreen,
+          feedbackColor === 'amber' && styles.voiceDisplayAmber,
+          feedbackColor === 'red' && styles.voiceDisplayRed,
+        ]}>
+          {showCorrect ? (
+            <Text style={styles.correctAnswer}>{showCorrect} {showDirection}</Text>
+          ) : recognizedText ? (
+            <Text style={styles.recognizedText}>{recognizedText}</Text>
+          ) : null}
         </View>
       </View>
 
@@ -643,18 +790,19 @@ const styles = StyleSheet.create({
   scrollContainer: { flex: 1, backgroundColor: '#0f0f23' },
   scrollContent: { alignItems: 'center', paddingTop: 20, paddingBottom: 40 },
   activeInner: { alignItems: 'center', paddingTop: 12 },
-  title: { fontSize: 22, color: '#ff9500', fontWeight: '700', letterSpacing: 1, marginBottom: 8 },
+  title: { fontSize: 22, color: '#00d4ff', fontWeight: '700', letterSpacing: 1, marginBottom: 8 },
   description: { fontSize: 16, color: '#aabbcc', textAlign: 'center', marginTop: 40, lineHeight: 24 },
   bestScore: { fontSize: 14, color: '#00e676', fontWeight: '600', marginTop: 16 },
-  primaryBtn: { marginTop: 24, backgroundColor: '#ff9500', paddingHorizontal: 36, paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
-  primaryBtnText: { fontSize: 18, fontWeight: '700', color: '#ffffff' },
+  primaryBtn: { marginTop: 24, backgroundColor: '#00d4ff', paddingHorizontal: 36, paddingVertical: 12, borderRadius: 8, alignItems: 'center' },
+  primaryBtnText: { fontSize: 18, fontWeight: '700', color: '#0f0f23' },
   primaryBtnHint: { fontSize: 11, color: '#ffffff', opacity: 0.6, marginTop: 2 },
   btnDisabled: { opacity: 0.4 },
   btnSaved: { borderColor: '#00e676' },
   secondaryBtn: { marginTop: 12, borderWidth: 1, borderColor: '#3a4a5a', paddingHorizontal: 28, paddingVertical: 10, borderRadius: 8 },
   secondaryBtnText: { color: '#aabbcc', fontSize: 15, fontWeight: '600' },
-  headingAreaCompact: { height: 100, width: '100%', justifyContent: 'center', alignItems: 'center', position: 'relative' },
-  getReady: { fontSize: 24, color: '#ffab00', fontWeight: '700' },
+  timerArea: { marginBottom: 20 },
+  headingInRing: { fontSize: 48, fontWeight: '700', color: '#00d4ff', fontVariant: ['tabular-nums'] },
+  getReady: { fontSize: 18, color: '#ffab00', fontWeight: '700' },
   newBest: { fontSize: 18, color: '#ffab00', fontWeight: '700', marginBottom: 8 },
   scoreLine: { fontSize: 24, color: '#00e676', fontWeight: '700', marginTop: 8 },
   scoreBreakdown: { fontSize: 13, color: '#aabbcc', marginBottom: 8 },
@@ -668,14 +816,14 @@ const styles = StyleSheet.create({
   tile: { width: 48, height: 40, borderWidth: 1, borderRadius: 4, alignItems: 'center', justifyContent: 'center' },
   tileSelected: { borderWidth: 3 },
   tileText: { fontSize: 13, fontWeight: '700', fontVariant: ['tabular-nums'] },
-  smallBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#ff9500' },
-  smallBtnText: { color: '#ff9500', fontSize: 12, fontWeight: '600' },
+  smallBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#00d4ff' },
+  smallBtnText: { color: '#00d4ff', fontSize: 12, fontWeight: '600' },
   suggestRow: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', marginTop: 16, paddingHorizontal: 16 },
   suggestLabel: { fontSize: 14, color: '#aabbcc', fontWeight: '600' },
   suggestHeading: { fontSize: 15, fontWeight: '700' },
   suggestLearnMode: { fontSize: 14, color: '#ff5555', fontWeight: '600' },
-  acceptBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#ff9500', marginLeft: 10 },
-  acceptBtnText: { color: '#ff9500', fontSize: 13, fontWeight: '600' },
+  acceptBtn: { paddingHorizontal: 14, paddingVertical: 6, borderRadius: 6, borderWidth: 1, borderColor: '#00d4ff', marginLeft: 10 },
+  acceptBtnText: { color: '#00d4ff', fontSize: 13, fontWeight: '600' },
   resetBtn: { position: 'absolute', top: 12, right: 12, paddingHorizontal: 12, paddingVertical: 6, borderWidth: 1, borderColor: '#ff5555', borderRadius: 6, zIndex: 20 },
   resetBtnText: { color: '#ff5555', fontSize: 13, fontWeight: '600' },
   controlBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 6, borderWidth: 1, borderColor: '#3a4a5a' },
@@ -685,8 +833,6 @@ const styles = StyleSheet.create({
   gridCell: { width: 28, height: 20, borderWidth: 1, borderRadius: 2, alignItems: 'center', justifyContent: 'center' },
   gridCellText: { fontSize: 8, fontWeight: '700', fontVariant: ['tabular-nums'] },
   gridPositioner: { position: 'absolute', left: 12, top: 60, zIndex: 10 },
-  voiceArea: { alignItems: 'center', marginTop: 4, width: '100%' },
-  timerRow: { marginBottom: 16 },
   voiceDisplay: {
     width: '80%',
     maxWidth: 300,
@@ -703,22 +849,19 @@ const styles = StyleSheet.create({
   voiceDisplayAmber: { borderColor: '#ffab00', backgroundColor: 'rgba(255,171,0,0.1)' },
   voiceDisplayRed: { borderColor: '#ff5555', backgroundColor: 'rgba(255,85,85,0.1)' },
   recognizedText: { fontSize: 24, fontWeight: '700', color: '#ffffff' },
-  voicePlaceholder: { fontSize: 16, color: '#667788' },
-  correctAnswerDisplay: { alignItems: 'center' },
-  correctReciprocal: { fontSize: 28, fontWeight: '700', color: '#00e676' },
-  correctDirection: { fontSize: 16, color: '#00e676', marginTop: 4 },
+  correctAnswer: { fontSize: 24, fontWeight: '700', color: '#00e676' },
   micButton: {
     width: 80,
     height: 80,
     borderRadius: 40,
     backgroundColor: '#1a1a2e',
     borderWidth: 3,
-    borderColor: '#ff9500',
+    borderColor: '#00d4ff',
     justifyContent: 'center',
     alignItems: 'center',
     marginBottom: 12,
   },
-  micButtonActive: { backgroundColor: 'rgba(255,149,0,0.2)', borderColor: '#ffab00' },
+  micButtonActive: { backgroundColor: 'rgba(0,212,255,0.2)', borderColor: '#00d4ff' },
   micButtonDisabled: { opacity: 0.4, borderColor: '#3a4a5a' },
   micIcon: { fontSize: 32 },
   micLabel: { fontSize: 10, color: '#aabbcc', marginTop: 2 },
