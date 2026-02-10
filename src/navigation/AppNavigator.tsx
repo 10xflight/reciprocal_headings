@@ -1,5 +1,5 @@
 import React from 'react';
-import { Pressable, Text, StyleSheet } from 'react-native';
+import { Pressable, Text, View, StyleSheet } from 'react-native';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -76,9 +76,55 @@ function BackButton({ to }: { to: keyof RootStackParamList }) {
   );
 }
 
+// Home button
+function HomeButton() {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  return (
+    <Pressable onPress={() => navigation.navigate('Home')} style={styles.iconBtn}>
+      <Text style={styles.iconText}>⌂</Text>
+    </Pressable>
+  );
+}
+
+// Settings button
+function SettingsButton() {
+  const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  return (
+    <Pressable onPress={() => navigation.navigate('Settings')} style={styles.iconBtn}>
+      <Text style={styles.iconText}>⚙</Text>
+    </Pressable>
+  );
+}
+
+// Header right with home and settings icons
+function HeaderRight({ showHome = true }: { showHome?: boolean }) {
+  return (
+    <View style={styles.headerRight}>
+      {showHome && <HomeButton />}
+      <SettingsButton />
+    </View>
+  );
+}
+
+// Breadcrumb title component
+function BreadcrumbTitle({ path }: { path: string[] }) {
+  return (
+    <View style={styles.breadcrumbContainer}>
+      <Text style={styles.breadcrumbText} numberOfLines={1}>
+        {path.join(' › ')}
+      </Text>
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   backBtn: { paddingHorizontal: 12, paddingVertical: 8 },
   backArrow: { color: '#fff', fontSize: 28, fontWeight: '300' },
+  iconBtn: { paddingHorizontal: 10, paddingVertical: 8 },
+  iconText: { color: '#fff', fontSize: 20 },
+  headerRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  breadcrumbContainer: { flex: 1, alignItems: 'center' },
+  breadcrumbText: { color: '#fff', fontSize: 16, fontWeight: '600' },
 });
 
 export default function AppNavigator() {
@@ -91,150 +137,277 @@ export default function AppNavigator() {
         headerTitleStyle: { fontWeight: 'bold' },
       }}
     >
+      {/* Home - no home button, just settings */}
       <Stack.Screen
         name="Home"
         component={HomeScreen}
-        options={{ title: 'Reciprocal Headings', headerLeft: () => null }}
+        options={{
+          title: 'Reciprocal Headings',
+          headerLeft: () => null,
+          headerRight: () => <HeaderRight showHome={false} />,
+        }}
       />
+
+      {/* Level 1 */}
       <Stack.Screen
         name="Level1Menu"
         component={Level1MenuScreen}
-        options={{ title: 'Level 1', headerLeft: () => <BackButton to="Home" /> }}
+        options={{
+          headerTitle: () => <BreadcrumbTitle path={['L1']} />,
+          headerLeft: () => <BackButton to="Home" />,
+          headerRight: () => <HeaderRight />,
+        }}
       />
       <Stack.Screen
         name="PracticeHome"
         component={PracticeHomeScreen}
-        options={{ title: 'Practice Mode', headerLeft: () => <BackButton to="Level1Menu" /> }}
+        options={{
+          headerTitle: () => <BreadcrumbTitle path={['L1', 'Practice']} />,
+          headerLeft: () => <BackButton to="Level1Menu" />,
+          headerRight: () => <HeaderRight />,
+        }}
       />
       <Stack.Screen
         name="LearnMode"
         component={LearnModeScreen}
-        options={{ title: 'Learn Mode', headerLeft: () => <BackButton to="PracticeHome" /> }}
+        options={{
+          headerTitle: () => <BreadcrumbTitle path={['L1', 'Practice', 'Learn']} />,
+          headerLeft: () => <BackButton to="PracticeHome" />,
+          headerRight: () => <HeaderRight />,
+        }}
       />
       <Stack.Screen
         name="FocusSelection"
         component={FocusSelectionScreen}
-        options={{ title: 'Focus — Select Headings', headerLeft: () => <BackButton to="PracticeHome" /> }}
+        options={{
+          headerTitle: () => <BreadcrumbTitle path={['L1', 'Practice', 'Focus']} />,
+          headerLeft: () => <BackButton to="PracticeHome" />,
+          headerRight: () => <HeaderRight />,
+        }}
       />
       <Stack.Screen
         name="FocusMode"
         component={FocusModeScreen}
-        options={{ title: 'Focus Mode', headerLeft: () => <BackButton to="FocusSelection" /> }}
+        options={{
+          headerTitle: () => <BreadcrumbTitle path={['L1', 'Practice', 'Focus']} />,
+          headerLeft: () => <BackButton to="FocusSelection" />,
+          headerRight: () => <HeaderRight />,
+        }}
       />
       <Stack.Screen
         name="OptimizeMode"
         component={OptimizeModeScreen}
-        options={{ title: 'Optimize Mode', headerLeft: () => <BackButton to="PracticeHome" /> }}
+        options={{
+          headerTitle: () => <BreadcrumbTitle path={['L1', 'Practice', 'Optimize']} />,
+          headerLeft: () => <BackButton to="PracticeHome" />,
+          headerRight: () => <HeaderRight />,
+        }}
       />
       <Stack.Screen
         name="MasteryChallenge"
         component={MasteryChallengeScreen}
-        options={{ title: 'Mastery Challenge', headerLeft: () => <BackButton to="Level1Menu" /> }}
+        options={{
+          headerTitle: () => <BreadcrumbTitle path={['L1', 'Mastery']} />,
+          headerLeft: () => <BackButton to="Level1Menu" />,
+          headerRight: () => <HeaderRight />,
+        }}
       />
       <Stack.Screen
         name="Trial"
         component={TrialScreen}
-        options={{ title: 'Trial Mode', headerLeft: () => <BackButton to="Level1Menu" /> }}
+        options={{
+          headerTitle: () => <BreadcrumbTitle path={['L1', 'Trial']} />,
+          headerLeft: () => <BackButton to="Level1Menu" />,
+          headerRight: () => <HeaderRight />,
+        }}
       />
+
+      {/* Level 2 */}
       <Stack.Screen
         name="Level2Menu"
         component={Level2MenuScreen}
-        options={{ title: 'Level 2', headerLeft: () => <BackButton to="Home" /> }}
+        options={{
+          headerTitle: () => <BreadcrumbTitle path={['L2']} />,
+          headerLeft: () => <BackButton to="Home" />,
+          headerRight: () => <HeaderRight />,
+        }}
       />
       <Stack.Screen
         name="Practice2Home"
         component={Practice2HomeScreen}
-        options={{ title: 'Practice Mode', headerLeft: () => <BackButton to="Level2Menu" /> }}
+        options={{
+          headerTitle: () => <BreadcrumbTitle path={['L2', 'Practice']} />,
+          headerLeft: () => <BackButton to="Level2Menu" />,
+          headerRight: () => <HeaderRight />,
+        }}
       />
       <Stack.Screen
         name="Level2Learn"
         component={Level2ModeScreen}
-        options={{ title: 'Learn Mode', headerLeft: () => <BackButton to="Practice2Home" /> }}
+        options={{
+          headerTitle: () => <BreadcrumbTitle path={['L2', 'Practice', 'Learn']} />,
+          headerLeft: () => <BackButton to="Practice2Home" />,
+          headerRight: () => <HeaderRight />,
+        }}
       />
       <Stack.Screen
         name="Level2FocusSelection"
         component={Level2FocusSelectionScreen}
-        options={{ title: 'Focus — Select Headings', headerLeft: () => <BackButton to="Practice2Home" /> }}
+        options={{
+          headerTitle: () => <BreadcrumbTitle path={['L2', 'Practice', 'Focus']} />,
+          headerLeft: () => <BackButton to="Practice2Home" />,
+          headerRight: () => <HeaderRight />,
+        }}
       />
       <Stack.Screen
         name="Level2Focus"
         component={Level2FocusModeScreen}
-        options={{ title: 'Focus Mode', headerLeft: () => <BackButton to="Level2FocusSelection" /> }}
+        options={{
+          headerTitle: () => <BreadcrumbTitle path={['L2', 'Practice', 'Focus']} />,
+          headerLeft: () => <BackButton to="Level2FocusSelection" />,
+          headerRight: () => <HeaderRight />,
+        }}
       />
       <Stack.Screen
         name="Level2Optimize"
         component={Level2OptimizeModeScreen}
-        options={{ title: 'Optimize Mode', headerLeft: () => <BackButton to="Practice2Home" /> }}
+        options={{
+          headerTitle: () => <BreadcrumbTitle path={['L2', 'Practice', 'Optimize']} />,
+          headerLeft: () => <BackButton to="Practice2Home" />,
+          headerRight: () => <HeaderRight />,
+        }}
       />
       <Stack.Screen
         name="Level2MasteryChallenge"
         component={Level2MasteryChallengeScreen}
-        options={{ title: 'Mastery Challenge', headerLeft: () => <BackButton to="Level2Menu" /> }}
+        options={{
+          headerTitle: () => <BreadcrumbTitle path={['L2', 'Mastery']} />,
+          headerLeft: () => <BackButton to="Level2Menu" />,
+          headerRight: () => <HeaderRight />,
+        }}
       />
       <Stack.Screen
         name="Level2Mode"
         component={Level2ModeScreen}
-        options={{ title: 'Level 2 Mode', headerLeft: () => <BackButton to="Home" /> }}
+        options={{
+          headerTitle: () => <BreadcrumbTitle path={['L2']} />,
+          headerLeft: () => <BackButton to="Home" />,
+          headerRight: () => <HeaderRight />,
+        }}
       />
+
+      {/* Level 3 */}
       <Stack.Screen
         name="Level3Menu"
         component={Level3MenuScreen}
-        options={{ title: 'Level 3', headerLeft: () => <BackButton to="Home" /> }}
+        options={{
+          headerTitle: () => <BreadcrumbTitle path={['L3']} />,
+          headerLeft: () => <BackButton to="Home" />,
+          headerRight: () => <HeaderRight />,
+        }}
       />
       <Stack.Screen
         name="Practice3Home"
         component={Practice3HomeScreen}
-        options={{ title: 'Practice Mode', headerLeft: () => <BackButton to="Level3Menu" /> }}
+        options={{
+          headerTitle: () => <BreadcrumbTitle path={['L3', 'Practice']} />,
+          headerLeft: () => <BackButton to="Level3Menu" />,
+          headerRight: () => <HeaderRight />,
+        }}
       />
       <Stack.Screen
         name="Level3Learn"
         component={Level3ModeScreen}
-        options={{ title: 'Learn Mode', headerLeft: () => <BackButton to="Practice3Home" /> }}
+        options={{
+          headerTitle: () => <BreadcrumbTitle path={['L3', 'Practice', 'Learn']} />,
+          headerLeft: () => <BackButton to="Practice3Home" />,
+          headerRight: () => <HeaderRight />,
+        }}
       />
       <Stack.Screen
         name="Level3FocusSelection"
         component={Level3FocusSelectionScreen}
-        options={{ title: 'Focus — Select Headings', headerLeft: () => <BackButton to="Practice3Home" /> }}
+        options={{
+          headerTitle: () => <BreadcrumbTitle path={['L3', 'Practice', 'Focus']} />,
+          headerLeft: () => <BackButton to="Practice3Home" />,
+          headerRight: () => <HeaderRight />,
+        }}
       />
       <Stack.Screen
         name="Level3Focus"
         component={Level3FocusModeScreen}
-        options={{ title: 'Focus Mode', headerLeft: () => <BackButton to="Level3FocusSelection" /> }}
+        options={{
+          headerTitle: () => <BreadcrumbTitle path={['L3', 'Practice', 'Focus']} />,
+          headerLeft: () => <BackButton to="Level3FocusSelection" />,
+          headerRight: () => <HeaderRight />,
+        }}
       />
       <Stack.Screen
         name="Level3Optimize"
         component={Level3OptimizeModeScreen}
-        options={{ title: 'Optimize Mode', headerLeft: () => <BackButton to="Practice3Home" /> }}
+        options={{
+          headerTitle: () => <BreadcrumbTitle path={['L3', 'Practice', 'Optimize']} />,
+          headerLeft: () => <BackButton to="Practice3Home" />,
+          headerRight: () => <HeaderRight />,
+        }}
       />
       <Stack.Screen
         name="Level3MasteryChallenge"
         component={Level3MasteryChallengeScreen}
-        options={{ title: 'Mastery Challenge', headerLeft: () => <BackButton to="Level3Menu" /> }}
+        options={{
+          headerTitle: () => <BreadcrumbTitle path={['L3', 'Mastery']} />,
+          headerLeft: () => <BackButton to="Level3Menu" />,
+          headerRight: () => <HeaderRight />,
+        }}
       />
+
+      {/* Legacy Practice screens */}
       <Stack.Screen
         name="Practice2"
         component={Level2Screen}
-        options={{ title: 'Level 2 — Practice', headerLeft: () => <BackButton to="Home" /> }}
+        options={{
+          headerTitle: () => <BreadcrumbTitle path={['L2', 'Practice']} />,
+          headerLeft: () => <BackButton to="Home" />,
+          headerRight: () => <HeaderRight />,
+        }}
       />
       <Stack.Screen
         name="Practice3"
         component={Level3Screen}
-        options={{ title: 'Level 3 — Practice', headerLeft: () => <BackButton to="Home" /> }}
+        options={{
+          headerTitle: () => <BreadcrumbTitle path={['L3', 'Practice']} />,
+          headerLeft: () => <BackButton to="Home" />,
+          headerRight: () => <HeaderRight />,
+        }}
       />
       <Stack.Screen
         name="Practice4"
         component={Level4Screen}
-        options={{ title: 'Level 4 — Practice', headerLeft: () => <BackButton to="Home" /> }}
+        options={{
+          headerTitle: () => <BreadcrumbTitle path={['L4', 'Practice']} />,
+          headerLeft: () => <BackButton to="Home" />,
+          headerRight: () => <HeaderRight />,
+        }}
       />
       <Stack.Screen
         name="Practice5"
         component={Level5Screen}
-        options={{ title: 'Level 5 — Practice', headerLeft: () => <BackButton to="Home" /> }}
+        options={{
+          headerTitle: () => <BreadcrumbTitle path={['L5', 'Practice']} />,
+          headerLeft: () => <BackButton to="Home" />,
+          headerRight: () => <HeaderRight />,
+        }}
       />
+
+      {/* Settings - no home button since it's accessible from everywhere */}
       <Stack.Screen
         name="Settings"
         component={SettingsScreen}
-        options={{ title: 'Settings', headerLeft: () => <BackButton to="Home" /> }}
+        options={{
+          title: 'Settings',
+          headerLeft: () => <BackButton to="Home" />,
+          headerRight: () => <HomeButton />,
+        }}
       />
     </Stack.Navigator>
   );

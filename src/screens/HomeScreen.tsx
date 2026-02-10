@@ -108,15 +108,6 @@ export default function HomeScreen() {
           </Text>
         </TouchableOpacity>
       ))}
-
-      {/* Settings */}
-      <TouchableOpacity
-        style={[styles.card, { marginTop: 24 }]}
-        onPress={() => navigation.navigate('Settings')}
-      >
-        <Text style={styles.stageName}>Settings</Text>
-        <Text style={styles.cardDetail}>Export, import, reset, or unlock levels</Text>
-      </TouchableOpacity>
     </ScrollView>
   );
 }
