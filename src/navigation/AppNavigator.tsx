@@ -71,7 +71,7 @@ function BackButton({ to }: { to: keyof RootStackParamList }) {
   const navigation = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   return (
     <Pressable onPress={() => navigation.navigate(to as any)} style={styles.backBtn}>
-      <Text style={styles.backArrow}>‹</Text>
+      <Text style={styles.backArrow}>←</Text>
     </Pressable>
   );
 }
@@ -117,7 +117,7 @@ function BreadcrumbTitle({ path }: { path: string[] }) {
 
 const styles = StyleSheet.create({
   backBtn: { paddingHorizontal: 12, paddingVertical: 8 },
-  backArrow: { color: '#fff', fontSize: 28, fontWeight: '300', lineHeight: 28 },
+  backArrow: { color: '#fff', fontSize: 22 },
   iconBtn: { paddingHorizontal: 10, paddingVertical: 8 },
   iconText: { color: '#fff', fontSize: 20 },
   headerRight: { flexDirection: 'row', alignItems: 'center', gap: 4 },
