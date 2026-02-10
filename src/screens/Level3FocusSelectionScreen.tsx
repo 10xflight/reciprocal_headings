@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
 import { NativeStackNavigationProp } from '@react-navigation/native-stack';
@@ -27,6 +27,11 @@ export default function Level3FocusSelectionScreen() {
     new Set(savedSelection.length > 0 ? savedSelection : []),
   );
   const [showResetConfirm, setShowResetConfirm] = useState(false);
+
+  // Save selection whenever it changes
+  useEffect(() => {
+    saveFocusSelection(Array.from(selected));
+  }, [selected, saveFocusSelection]);
 
   const toggleHeading = (h: string) => {
     setSelected((prev) => {
@@ -154,13 +159,13 @@ const styles = StyleSheet.create({
     width: 48, height: 40, borderWidth: 1, borderRadius: 4,
     alignItems: 'center', justifyContent: 'center',
   },
-  cellSelected: { borderWidth: 3, backgroundColor: 'rgba(255,149,0,0.25)' },
+  cellSelected: { borderWidth: 3, backgroundColor: 'rgba(0,212,255,0.25)' },
   gridCellText: { fontSize: 13, fontWeight: '700', fontVariant: ['tabular-nums'] },
   utilRow: { flexDirection: 'row', gap: 12, marginTop: 16 },
   utilBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 6, borderWidth: 1, borderColor: '#3a4a5a' },
   utilBtnText: { color: '#aabbcc', fontSize: 13, fontWeight: '600' },
   primaryBtn: { marginTop: 20, backgroundColor: '#00d4ff', paddingHorizontal: 36, paddingVertical: 12, borderRadius: 8 },
-  primaryBtnText: { fontSize: 18, fontWeight: '700', color: '#ffffff' },
+  primaryBtnText: { fontSize: 18, fontWeight: '700', color: '#0f0f23' },
   btnDisabled: { opacity: 0.4 },
   secondaryBtn: { marginTop: 12, borderWidth: 1, borderColor: '#3a4a5a', paddingHorizontal: 28, paddingVertical: 10, borderRadius: 8 },
   secondaryBtnText: { color: '#aabbcc', fontSize: 15, fontWeight: '600' },
