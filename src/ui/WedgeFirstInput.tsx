@@ -257,17 +257,38 @@ export default function WedgeFirstInput({
     const { x, y } = getRelativePosition(pageX, pageY);
     const { angle, distance } = getAngleAndDistance(x, y, 0, 0);
 
-    if (expandedWedge !== null) {
-      // Check if tapping a heading button
+    // Check if clicking center - close expanded wedge
+    if (distance < WEDGE_INNER) {
+      if (expandedWedge !== null) {
+        setExpandedWedge(null);
+      }
+      return;
+    }
+
+    // Check if clicking outside compass entirely - close expanded wedge
+    const outerBoundary = expandedWedge !== null ? HEADING_RING_OUTER : WEDGE_OUTER;
+    if (distance > outerBoundary + 10) {
+      if (expandedWedge !== null) {
+        setExpandedWedge(null);
+      }
+      return;
+    }
+
+    // Check if pressing on a wedge area
+    if (distance >= WEDGE_INNER && distance <= WEDGE_OUTER) {
+      const wedgeIndex = getWedgeFromAngle(angle);
+      // Immediately expand this wedge (for hold+drag flow, or direct switch)
+      setExpandedWedge(wedgeIndex);
+      setHoveredWedge(null);
+      setHoveredHeading(null);
+      return;
+    }
+
+    // Check if pressing on heading button area (when wedge is expanded)
+    if (expandedWedge !== null && distance >= HEADING_RING_INNER && distance <= HEADING_RING_OUTER) {
       const headingHit = getHeadingButtonFromAngle(angle, distance, expandedWedge);
       if (headingHit) {
         setHoveredHeading(headingHit);
-      }
-    } else {
-      // Check if tapping a wedge
-      if (distance >= WEDGE_INNER && distance <= WEDGE_OUTER) {
-        const wedgeIndex = getWedgeFromAngle(angle);
-        setHoveredWedge(wedgeIndex);
       }
     }
   }, [disabled, showFeedback, getRelativePosition, expandedWedge]);
@@ -279,9 +300,15 @@ export default function WedgeFirstInput({
     const { angle, distance } = getAngleAndDistance(x, y, 0, 0);
 
     if (expandedWedge !== null) {
-      const headingHit = getHeadingButtonFromAngle(angle, distance, expandedWedge);
-      setHoveredHeading(headingHit);
+      // Track hover over heading buttons in outer ring (for drag-to-select)
+      if (distance >= HEADING_RING_INNER - 10 && distance <= HEADING_RING_OUTER + 10) {
+        const headingHit = getHeadingButtonFromAngle(angle, distance, expandedWedge);
+        setHoveredHeading(headingHit);
+      } else {
+        setHoveredHeading(null);
+      }
     } else {
+      // Track hover over wedges when none expanded
       if (distance >= WEDGE_INNER && distance <= WEDGE_OUTER) {
         const wedgeIndex = getWedgeFromAngle(angle);
         setHoveredWedge(wedgeIndex);
@@ -298,27 +325,22 @@ export default function WedgeFirstInput({
     const { angle, distance } = getAngleAndDistance(x, y, 0, 0);
 
     if (expandedWedge !== null) {
-      // Check if tapping a heading button
-      const headingHit = getHeadingButtonFromAngle(angle, distance, expandedWedge);
-      if (headingHit) {
-        // Submit answer
-        setSelectedHeading(headingHit);
-        setSelectedWedge(expandedWedge);
-        // Build submitted answer text: "18 South"
-        const dirLabel = DIRECTION_LABELS[DIRECTIONS[expandedWedge]];
-        setSubmittedAnswer(`${headingHit} ${dirLabel}`);
-        onAnswer(headingHit, expandedWedge, 0); // elapsed will be calculated by parent
-      } else {
-        // Tapped outside - collapse without penalty
-        setExpandedWedge(null);
+      // Check if releasing on a heading button (completes the swipe/drag)
+      if (distance >= HEADING_RING_INNER - 10 && distance <= HEADING_RING_OUTER + 10) {
+        const headingHit = getHeadingButtonFromAngle(angle, distance, expandedWedge);
+        if (headingHit) {
+          // Submit answer
+          setSelectedHeading(headingHit);
+          setSelectedWedge(expandedWedge);
+          // Build submitted answer text: "18 South"
+          const dirLabel = DIRECTION_LABELS[DIRECTIONS[expandedWedge]];
+          setSubmittedAnswer(`${headingHit} ${dirLabel}`);
+          onAnswer(headingHit, expandedWedge, 0); // elapsed will be calculated by parent
+        }
       }
-    } else {
-      // Check if tapping a wedge to expand
-      if (distance >= WEDGE_INNER && distance <= WEDGE_OUTER) {
-        const wedgeIndex = getWedgeFromAngle(angle);
-        setExpandedWedge(wedgeIndex);
-      }
+      // If released on wedge area or elsewhere, wedge stays open (user can tap heading or tap outside to close)
     }
+    // Wedge expansion on press is already handled in handlePointerDown
 
     setHoveredWedge(null);
     setHoveredHeading(null);
